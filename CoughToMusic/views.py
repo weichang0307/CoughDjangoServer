@@ -154,13 +154,13 @@ def generate(request):
             return JsonResponse({'generate_path': generate_path}, status=200)
 
 @csrf_exempt        
-def create_user(request):
+def sign_up(request):
     if request.method == 'POST':
         try:
             metadata_dict = json.loads(request.body)
             userid = metadata_dict.get('userId')
             init_user_folder(userid)
-            
+            print(metadata_dict)
             # 假設音頻數據為 float32 格式的原始數據流
             return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
         except Exception as e:
@@ -206,6 +206,38 @@ def clean_temper(request):
         
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
+@csrf_exempt 
+def get_user_info(request):
+    if request.method == 'POST':
+        try:
+            return JsonResponse({
+                'isSignUp': True,
+                'name' : 'test',
+                'age' : '20',
+                'gender' : 'Male',
+                'education' : 'Master',
+                'musicProficiency' : '4'
+            }, status=200)
+            
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+        
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
+
+@csrf_exempt 
+def set_user_info(request):
+    if request.method == 'POST':
+        try:
+            metadata_dict = json.loads(request.body)
+            print(metadata_dict)
+            return JsonResponse({'message': 'Save music successfully.'}, status=200)
+            
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+        
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
 def upload_cough(request):
     return JsonResponse({'message': 'Upload cough audio successfully.'}, status=200)
 
