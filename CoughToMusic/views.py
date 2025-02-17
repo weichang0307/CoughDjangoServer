@@ -106,8 +106,6 @@ def get_music(request):
             userid = metadata_dict.get('userId')
             upload_folder = os.path.join(settings.MEDIA_ROOT, userid, 'generated_music')
             
-            print("upload_folder: ", upload_folder)
-            
             # 使用 os.walk() 遞迴遍歷資料夾
             for root, dirs, files in os.walk(upload_folder):
                 for filename in files:
@@ -154,7 +152,6 @@ def generate(request):
                 data['alto'].lower(),
                 data['high'].lower()
             )
-            print("generate_path: ", generate_path)
 
             # Success response
             return JsonResponse({'generate_path': generate_path}, status=200)
@@ -169,7 +166,23 @@ def sign_up(request):
             init_user_table(userid, USER_TABLE_COLUMNS)
             init_cough_table(userid, COUGH_TABLE_COLUMNS)
             init_music_table(userid, MUSIC_TABLE_COLUMNS)
-            print(metadata_dict)
+            
+            user_folder = os.path.join(settings.MEDIA_ROOT, userid)
+            user_table_path = os.path.join(user_folder, f'{userid}.csv')
+            
+            # 檢查 CSV 文件是否存在
+            if not os.path.exists(user_table_path):
+                return JsonResponse({'error': f'User table {user_table_path} does not exist.'}, status=400)
+            
+            # 排除 user_id
+            data_to_update = {key: value for key, value in metadata_dict.items() if key != 'userId'}
+            data_to_update['isSignUp'] = True
+            
+            # 更新用戶資料
+            
+            update_user_table(userid, data_to_update)
+            
+            
             # 假設音頻數據為 float32 格式的原始數據流
             return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
         except Exception as e:
@@ -227,15 +240,16 @@ def get_user_info(request):
             
             # 檢查 CSV 文件是否存在
             if not os.path.exists(user_table_path):
-                return JsonResponse({'error': f'User table {user_table_path} does not exist.'}, status=400)
+                return JsonResponse({
+                'isSignUp': False
+            }, status=200)
             
             # 讀取 CSV 文件
             df = pd.read_csv(user_table_path)
             
             # 獲取所有資料
             user_info = df.to_dict(orient='records')
-            
-            return JsonResponse(user_info, safe=False, status=200)
+            return JsonResponse(user_info[0], status=200)
             
         except Exception as e:
             print("Error: ", e)
@@ -249,6 +263,7 @@ def set_user_info(request):
         try:
             metadata_dict = json.loads(request.body)
             user_id = metadata_dict.get('userId')
+            print("user_id: ", user_id)
             user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
             user_table_path = os.path.join(user_folder, f'{user_id}.csv')
             
@@ -258,6 +273,8 @@ def set_user_info(request):
             
             # 排除 user_id
             data_to_update = {key: value for key, value in metadata_dict.items() if key != 'userId'}
+            
+            print("data_to_update: ", data_to_update)
             
             # 更新用戶資料
             update_user_table(user_id, data_to_update)
@@ -460,6 +477,72 @@ def get_music_statistics(request):
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
     
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
+
+@csrf_exempt
+def upload_to_public_cough(request):
+    if request.method == 'POST':
+        try:
+            sample_rate = 16000
+            # 獲取 JSON 數據（存放於普通表單字段中）
+            metadata = request.POST.get('metadata')
+            
+            # 將 metadata 轉換為字典並提取 userid 和 filename
+            metadata_dict = json.loads(metadata)
+            filename = metadata_dict.get('fileName')
+            filename = os.path.join('', filename + '.wav')
+            
+            # 獲取上傳的音檔
+            audio_file = request.FILES.get('file')  # 獲取名為 'file' 的文件
+            audio_data = audio_file.read()
+            
+            # 接收音頻數據 
+            print("Receiving audio data...")
+            file_path = os.path.join(settings.PUBLIC_COUGH, filename)
+            
+            
+            save_pcm16_to_wav(file_path, audio_data, sample_rate)
+            print("file save to: ", file_path)
+            
+            # 假設音頻數據為 float32 格式的原始數據流
+            return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
+
+
+@csrf_exempt
+def upload_to_public_music(request):
+    if request.method == 'POST':
+        try:
+            sample_rate = 16000
+            # 獲取 JSON 數據（存放於普通表單字段中）
+            metadata = request.POST.get('metadata')
+            
+            # 將 metadata 轉換為字典並提取 userid 和 filename
+            metadata_dict = json.loads(metadata)
+            filename = metadata_dict.get('fileName')
+            filename = os.path.join('', filename + '.wav')
+            
+            # 獲取上傳的音檔
+            audio_file = request.FILES.get('file')  # 獲取名為 'file' 的文件
+            audio_data = audio_file.read()
+            
+            # 接收音頻數據 
+            print("Receiving audio data...")
+            file_path = os.path.join(settings.PUBLIC_MUSIC, filename)
+            
+            save_pcm16_to_wav(file_path, audio_data, sample_rate)
+            print("file save to: ", file_path)
+            
+            # 假設音頻數據為 float32 格式的原始數據流
+            return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+
     return JsonResponse({'error': 'Invalid request method'}, status=400)
         
         

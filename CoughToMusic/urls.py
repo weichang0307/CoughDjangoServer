@@ -16,4 +16,6 @@ urlpatterns = [
     path('set_cough_info/', views.set_cough_info, name='set_cough_info'),
     path('get_music_info/', views.get_music_info, name='get_music_info'),
     path('set_music_info/', views.set_music_info, name='set_music_info'),
+    path('upload_to_public_cough/', views.upload_to_public_cough, name='upload_to_public_cough'),
+    path('upload_to_public_music/', views.upload_to_public_music, name='upload_to_public_music'),
 ]
