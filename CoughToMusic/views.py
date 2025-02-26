@@ -11,8 +11,8 @@ import json
 import datetime
 
 USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicProficiency']
-COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'duration']
-MUSIC_TABLE_COLUMNS = ['filename', 'timestamp', 'duration', 'bass', 'alto', 'high', 'cough_filename', 'cough_filepath', 'music_filepath']
+COUGH_TABLE_COLUMNS = ['filename', 'timestamp']
+MUSIC_TABLE_COLUMNS = ['filename', 'timestamp']
 
 @csrf_exempt
 def create_cough_audio(request):
@@ -21,27 +21,26 @@ def create_cough_audio(request):
             sample_rate = 16000
             # 獲取 JSON 數據（存放於普通表單字段中）
             metadata = request.POST.get('metadata')
-            print(metadata)
             
             # 將 metadata 轉換為字典並提取 userid 和 filename
             metadata_dict = json.loads(metadata)
             userid = metadata_dict.get('userId')
             filename = metadata_dict.get('fileName')
             filename = os.path.join('', filename + '.wav')
-            print(f"User ID: {userid}")
-            print(f"File Name: {filename}")
             
             # 獲取上傳的音檔
             audio_file = request.FILES.get('file')  # 獲取名為 'file' 的文件
             audio_data = audio_file.read()
             
             # 接收音頻數據 
-            print("Receiving audio data...")
             file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', filename)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             
             save_pcm16_to_wav(file_path, audio_data, sample_rate)
-            print("file save to: ", file_path)
+            
+            # 更新 cough_table.csv
+            cough_table_data = {'filename': filename, 'timestamp': datetime.datetime.now().timestamp()}
+            update_cough_table(userid, cough_table_data)
             
             # 假設音頻數據為 float32 格式的原始數據流
             return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
@@ -85,11 +84,8 @@ def get_coughs(request):
  
 def get_uploads_file(request, filename):
     # 確保檔案存在
-    print("filename: ", filename)
     filename = filename.replace('^', '/') 
-    print("filename: ", filename)
     file_path = filename
-    print("file_path: ", file_path)
     if os.path.exists(file_path):
         return FileResponse(open(file_path, 'rb'), as_attachment=True)
     else:
@@ -152,6 +148,9 @@ def generate(request):
                 data['alto'].lower(),
                 data['high'].lower()
             )
+            
+            music_table_data = {"filename": generate_path, "timestamp": datetime.datetime.now().timestamp()}
+            update_music_table(data['user_id'], music_table_data)
 
             # Success response
             return JsonResponse({'generate_path': generate_path}, status=200)
@@ -395,6 +394,7 @@ def set_music_info(request):
         
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
+@csrf_exempt
 def get_cough_statistics(request):
     if request.method == 'POST':
         try:
@@ -423,11 +423,9 @@ def get_cough_statistics(request):
             
             # 回傳統計結果
             statistics = {
-                'cough': {
                     'day': cough_day_count,
                     'week': cough_week_count,
                     'month': cough_month_count
-                }
             }
             
             return JsonResponse(statistics, status=200)
@@ -437,6 +435,7 @@ def get_cough_statistics(request):
     
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
+@csrf_exempt
 def get_music_statistics(request):
     if request.method == 'POST':
         try:
@@ -465,11 +464,9 @@ def get_music_statistics(request):
             
             # 回傳統計結果
             statistics = {
-                'music': {
                     'day': music_day_count,
                     'week': music_week_count,
                     'month': music_month_count
-                }
             }
             
             return JsonResponse(statistics, status=200)
@@ -545,6 +542,18 @@ def upload_to_public_music(request):
 
     return JsonResponse({'error': 'Invalid request method'}, status=400)
         
+        
+@csrf_exempt
+def start_record(request):
+    if request.method == 'POST':
+        try:         
+            # 假設音頻數據為 float32 格式的原始數據流
+            return JsonResponse({'message': 'start audio.'}, status=200)
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
         
 
 

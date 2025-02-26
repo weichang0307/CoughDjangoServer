@@ -65,9 +65,8 @@ def update_cough_table(user_id, data):
     # 讀取現有的 CSV 文件
     df = pd.read_csv(cough_table_path)
     
-    for key, value in data.items():
-        if key in df.columns:
-            df.loc[0, key] = value  # 更新第一行的資料
+    new_row = pd.Series(data)
+    df = df.append(new_row, ignore_index=True)
     
     # 保存更新後的 DataFrame 到 CSV 文件
     df.to_csv(cough_table_path, index=False)
@@ -100,9 +99,8 @@ def update_music_table(user_id, data):
     # 讀取現有的 CSV 文件
     df = pd.read_csv(music_table_path)
     
-    for key, value in data.items():
-        if key in df.columns:
-            df.loc[0, key] = value  # 更新第一行的資料
+    new_row = pd.Series(data)
+    df = df.append(new_row, ignore_index=True)
     
     # 保存更新後的 DataFrame 到 CSV 文件
     df.to_csv(music_table_path, index=False)
