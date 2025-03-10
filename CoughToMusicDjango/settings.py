@@ -141,3 +141,6 @@ os.makedirs(PUBLIC_COUGH, exist_ok=True)
 
 PUBLIC_MUSIC = os.path.join(MEDIA_ROOT, 'public_music')
 os.makedirs(PUBLIC_MUSIC, exist_ok=True)
+
+IMPORT_COUGH_FOLDER = PUBLIC_MUSIC = os.path.join(MEDIA_ROOT, 'import_cough')
+os.makedirs(IMPORT_COUGH_FOLDER, exist_ok=True)

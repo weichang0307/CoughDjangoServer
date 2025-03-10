@@ -10,9 +10,10 @@ import pandas as pd
 import json
 import datetime
 
-USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicProficiency']
-COUGH_TABLE_COLUMNS = ['filename', 'timestamp']
-MUSIC_TABLE_COLUMNS = ['filename', 'timestamp']
+USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicProficiency', 'isCoughPublish', 'userEmail']
+COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time']
+MUSIC_TABLE_COLUMNS = ['filename', 'timestamp', 'time']
+
 
 @csrf_exempt
 def create_cough_audio(request):
@@ -35,11 +36,41 @@ def create_cough_audio(request):
             # 接收音頻數據 
             file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', filename)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            
             save_pcm16_to_wav(file_path, audio_data, sample_rate)
+
+            user_folder = os.path.join(settings.MEDIA_ROOT, userid)
+            os.makedirs(user_folder, exist_ok=True)
+            user_table_path = os.path.join(user_folder, f'{userid}.csv')
+
+            df = pd.read_csv(user_table_path)
+            isCoughPub = df.loc[0, 'isCoughPublish']
+
+            file_count = -1
+
+            if isCoughPub:
+                # 定義存儲路徑
+                folder_path_public = os.path.join(settings.MEDIA_ROOT, 'public_cough')
+    
+                # 確保資料夾存在
+                os.makedirs(folder_path_public, exist_ok=True)
+    
+                # 取得資料夾內檔案數量
+                existing_files = os.listdir(folder_path_public)
+                file_count = len(existing_files)
+    
+                # 設定新檔案名稱
+                filename = f"{file_count + 1}.wav"  # 你可以根據需要調整檔案名稱格式
+    
+                # 完整檔案路徑
+                file_path_public = os.path.join(folder_path_public, filename)
+    
+                # 儲存檔案
+                save_pcm16_to_wav(file_path_public, audio_data, sample_rate)
             
+            current_datetime = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+
             # 更新 cough_table.csv
-            cough_table_data = {'filename': filename, 'timestamp': datetime.datetime.now().timestamp()}
+            cough_table_data = {'filename': filename, 'timestamp': datetime.datetime.now().timestamp(), 'pubCoughID' : file_count+1, 'time' : current_datetime}
             update_cough_table(userid, cough_table_data)
             
             # 假設音頻數據為 float32 格式的原始數據流
@@ -47,7 +78,6 @@ def create_cough_audio(request):
         except Exception as e:
             print("Error: ", e)
             return JsonResponse({'error': str(e)}, status=400)
-
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
 @csrf_exempt
@@ -149,9 +179,6 @@ def generate(request):
                 data['high'].lower()
             )
             
-            music_table_data = {"filename": generate_path, "timestamp": datetime.datetime.now().timestamp()}
-            update_music_table(data['user_id'], music_table_data)
-
             # Success response
             return JsonResponse({'generate_path': generate_path}, status=200)
 
@@ -313,6 +340,7 @@ def get_cough_info(request):
         
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
+
 @csrf_exempt 
 def set_cough_info(request):
     if request.method == 'POST':
@@ -401,6 +429,8 @@ def get_cough_statistics(request):
             # 讀取 cough_table.csv
             metadata_dict = json.loads(request.body)
             user_id = metadata_dict.get('userId')
+            start_date = metadata_dict.get('startDate')
+            end_date = metadata_dict.get('endDate')
             cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
             
             if not os.path.exists(cough_table_path):
@@ -420,12 +450,21 @@ def get_cough_statistics(request):
             cough_day_count = cough_df[cough_df['timestamp'] >= one_day_ago].shape[0]
             cough_week_count = cough_df[cough_df['timestamp'] >= one_week_ago].shape[0]
             cough_month_count = cough_df[cough_df['timestamp'] >= one_month_ago].shape[0]
+
+            # 轉換 start_date 和 end_date 為 datetime
+            start_date = pd.to_datetime(start_date)
+            end_date = pd.to_datetime(end_date)
+            
+            # 過濾出在 start_date 和 end_date 之間的時間
+            filtered_df = cough_df[(cough_df['timestamp'] >= start_date) & (cough_df['timestamp'] <= end_date)]
+            time_list = filtered_df['time'].tolist()
             
             # 回傳統計結果
             statistics = {
-                    'day': cough_day_count,
-                    'week': cough_week_count,
-                    'month': cough_month_count
+                    'day': str(cough_day_count),
+                    'week': str(cough_week_count),
+                    'month': str(cough_month_count),
+                    'allTime': time_list
             }
             
             return JsonResponse(statistics, status=200)
@@ -462,11 +501,14 @@ def get_music_statistics(request):
             music_week_count = music_df[music_df['timestamp'] >= one_week_ago].shape[0]
             music_month_count = music_df[music_df['timestamp'] >= one_month_ago].shape[0]
             
+            time_list = music_df['time'].tolist()
+            
             # 回傳統計結果
             statistics = {
-                    'day': music_day_count,
-                    'week': music_week_count,
-                    'month': music_month_count
+                    'day': str(music_day_count),
+                    'week': str(music_week_count),
+                    'month': str(music_month_count),
+                    'allTime': time_list
             }
             
             return JsonResponse(statistics, status=200)
@@ -495,11 +537,8 @@ def upload_to_public_cough(request):
             
             # 接收音頻數據 
             print("Receiving audio data...")
-            file_path = os.path.join(settings.PUBLIC_COUGH, filename)
-            
-            
+            file_path = os.path.join(settings.IMPORT_COUGH_FOLDER, filename)
             save_pcm16_to_wav(file_path, audio_data, sample_rate)
-            print("file save to: ", file_path)
             
             # 假設音頻數據為 float32 格式的原始數據流
             return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
@@ -546,7 +585,20 @@ def upload_to_public_music(request):
 @csrf_exempt
 def start_record(request):
     if request.method == 'POST':
-        try:         
+        try:
+            metadata_dict = json.loads(request.body)
+            user_id = metadata_dict.get('userId')
+            user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
+            os.makedirs(user_folder, exist_ok=True)
+            user_table_path = os.path.join(user_folder, f'{user_id}.csv')
+            isCoughPub = metadata_dict.get('isPublish')
+            
+            df = pd.read_csv(user_table_path)
+            df.loc[0, 'isCoughPublish'] = isCoughPub
+            df.to_csv(user_table_path, index=False)
+
+
+
             # 假設音頻數據為 float32 格式的原始數據流
             return JsonResponse({'message': 'start audio.'}, status=200)
         except Exception as e:
@@ -554,6 +606,126 @@ def start_record(request):
             return JsonResponse({'error': str(e)}, status=400)
 
     return JsonResponse({'error': 'Invalid request method'}, status=400)
+
+@csrf_exempt
+def stop_record(request):
+    if request.method == 'POST':
+        try:         
+            # 假設音頻數據為 float32 格式的原始數據流
+            metadata_dict = json.loads(request.body)
+            user_id = metadata_dict.get('userId')
+            detecttime = metadata_dict.get('detectTime')
+        
+            return JsonResponse({'message': 'start audio.'}, status=200)
+        
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
+
+@csrf_exempt
+def delete_music(request):
+    if request.method == 'POST':
+        try:         
+            # 假設音頻數據為 float32 格式的原始數據流
+            metadata_dict = json.loads(request.body)
+            user_id = metadata_dict.get('userId')
+            deleted_music = metadata_dict.get('targetList')
+
+            music_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_music')
+            os.makedirs(music_folder, exist_ok=True)
+            music_table_path = os.path.join(music_folder, 'music_table.csv')
+
+            # 讀取現有的 CSV 文件
+            df = pd.read_csv(music_table_path)
+
+            for i in deleted_music:
+                df = df[df['filename'] != i['filename']]
+                temp = os.path.dirname(i['filePath'])
+                shutil.rmtree(temp)
+
+    
+            # 保存更新後的 DataFrame 到 CSV 文件
+            df.to_csv(music_table_path, index=False)
+            
+       
+            return JsonResponse({'message': 'start audio.'}, status=200)
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
+
+@csrf_exempt
+def rename_music(request):
+    if request.method == 'POST':
+        try:         
+            # 假設音頻數據為 float32 格式的原始數據流
+            metadata_dict = json.loads(request.body)
+            user_id = metadata_dict.get('userId')
+            oldName = metadata_dict.get('oldName')
+            name = metadata_dict.get('name')
+            
+            user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
+
+             ### 處理 generated_music 資料夾 ###
+            music_folder = os.path.join(user_folder, 'generated_music')
+            midi_folder = os.path.join(user_folder, 'generated_midi')
+
+            folders_to_search = [music_folder, midi_folder]
+    
+            for folder in folders_to_search:
+                # 確保資料夾存在
+                if not os.path.exists(folder):
+                    print(f"{folder} 資料夾不存在！")
+                    continue
+        
+                # 遍歷資料夾中的所有子資料夾
+                for root, dirs, files in os.walk(folder):
+                    # 檢查是否有資料夾名稱為 oldname
+                    if os.path.basename(root) == oldName:
+                        # 找到目標資料夾，接著處理其中的檔案
+                        print(f"處理資料夾: {root}")
+                
+                        # 遍歷資料夾中的所有檔案
+                        for file in files:
+                            if oldName in file:
+                                old_file_path = os.path.join(root, file)
+                                new_file_name = file.replace(oldName, name)
+                                new_file_path = os.path.join(root, new_file_name)
+                        
+                                # 重命名檔案
+                                os.rename(old_file_path, new_file_path)
+                                print(f"檔案已重命名: {old_file_path} -> {new_file_path}")
+                
+                        # 重命名資料夾
+                        new_folder_name = root.replace(oldName, name)
+                        if root != new_folder_name:
+                            os.rename(root, new_folder_name)
+                            print(f"資料夾已重命名: {root} -> {new_folder_name}")
+
+            music_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_music')
+            os.makedirs(music_folder, exist_ok=True)
+            music_table_path = os.path.join(music_folder, 'music_table.csv')
+
+            # 讀取現有的 CSV 文件
+            df = pd.read_csv(music_table_path)
+
+            df.loc[df['filename'] == oldName, 'filename'] = name
+    
+            # 保存更新後的 DataFrame 到 CSV 文件
+            df.to_csv(music_table_path, index=False)
+            
+       
+            return JsonResponse({'message': 'start audio.'}, status=200)
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
+
+
         
 
 

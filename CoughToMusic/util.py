@@ -3,6 +3,8 @@ from django.conf import settings
 from .lib import cough
 import wave
 import shutil
+import datetime
+from .table import update_music_table
 
 
 def save_pcm16_to_wav(filename, data, rate):
@@ -106,6 +108,10 @@ def save_music_move(user_id, filename, filename_display):
         shutil.rmtree(old_midi_folder)  # 移動完畢後刪除空資料夾
     else:
         print(f"Error: {old_midi_folder} does not exist.")
+
+    current_datetime = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    music_table_data = {"filename": filename_display, "timestamp": datetime.datetime.now().timestamp(), 'time' : current_datetime}
+    update_music_table(user_id, music_table_data)
 
     print(f"✅ Successfully moved music & midi files for {filename_display}")
 
