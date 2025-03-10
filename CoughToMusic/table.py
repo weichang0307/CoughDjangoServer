@@ -11,6 +11,7 @@ def init_user_table(user_id, columns_name):
     if not os.path.exists(user_table_path):
         # 如果不存在，創建一個新的 DataFrame 並保存為 CSV 文件
         df = pd.DataFrame(columns=columns_name)
+        df.loc[0, 'isCoughPublish'] = False  # 更新第一行的資料
         df.to_csv(user_table_path, index=False)
         print(f"User table {user_table_path} created successfully.")
     else:
@@ -36,7 +37,6 @@ def update_user_table(user_id, data):
               
     # 保存更新後的 DataFrame 到 CSV 文件
     df.to_csv(user_table_path, index=False)
-    print(f"User {user_id} updated successfully.")
     
 def init_cough_table(user_id, columns_name):
     cough_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio')
@@ -65,13 +65,10 @@ def update_cough_table(user_id, data):
     # 讀取現有的 CSV 文件
     df = pd.read_csv(cough_table_path)
     
-    for key, value in data.items():
-        if key in df.columns:
-            df.loc[0, key] = value  # 更新第一行的資料
-    
+    new_row = pd.Series(data)
+    df = pd.concat([df, new_row.to_frame().T], ignore_index=True)
     # 保存更新後的 DataFrame 到 CSV 文件
     df.to_csv(cough_table_path, index=False)
-    print(f"User {user_id} updated successfully.")
     
 def init_music_table(user_id, columns_name):
     music_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_music')
@@ -100,10 +97,11 @@ def update_music_table(user_id, data):
     # 讀取現有的 CSV 文件
     df = pd.read_csv(music_table_path)
     
-    for key, value in data.items():
-        if key in df.columns:
-            df.loc[0, key] = value  # 更新第一行的資料
+    # 新的資料列
+    new_row = pd.Series(data)
+    
+    # 使用 pd.concat() 來添加新列
+    df = pd.concat([df, new_row.to_frame().T], ignore_index=True)
     
     # 保存更新後的 DataFrame 到 CSV 文件
     df.to_csv(music_table_path, index=False)
-    print(f"User {user_id} updated successfully.")

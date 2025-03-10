@@ -18,7 +18,7 @@ def normalize_wav_length(input_path, output_path, target_length_sec):
     sf.write(output_path, y_resampled, sr)
 
 def cough_to_midi_wavs(
-    threshold, freq_range_th, note_interval_th, min_target, max_target, num, energy_th, folder_path, out_dir="results"):
+    threshold, freq_range_th, note_interval_th, min_target, max_target, energy_th, folder_path, out_dir):
     recorded_coughs = Path("recorded_coughs").glob("cough_*.wav")
     for cough in recorded_coughs:
         cough = str(cough)
@@ -30,8 +30,8 @@ def cough_to_midi_wavs(
         onset_time = onset.detect(cough_data, sample_rate) 
         # midi_file = f"./{out_dir}/{folder_path}_mid/{folder_path}_{file_index}.mid"
         midi_file = str(Path(out_dir) / f"{folder_path}_mid" / f"{folder_path}_{file_index}.mid")
-        freq.write_midi(cough_data,sample_rate,cough_freq,midi_file,min_target,max_target,freq_range_th,note_interval_th,)
-        if (freq.write_midi(cough_data,sample_rate,cough_freq,midi_file,min_target,max_target,freq_range_th,note_interval_th,)== False):
+        freq.write_midi(cough_data,sample_rate,cough_freq,midi_file,min_target,max_target,freq_range_th,note_interval_th)
+        if (freq.write_midi(cough_data,sample_rate,cough_freq,midi_file,min_target,max_target,freq_range_th,note_interval_th)== False):
                 continue
         else:
             midi_2bars = midi.to_2bars(midi_file, midi_file )  
@@ -47,7 +47,14 @@ def cough_to_midi_wavs(
             midi.write_from_midi(midi_file, output_path, "piano")
             print(f"Wrote {output_path}")
 
-cough_to_midi_wavs(0.3, 0.2, 20, "C3", "C6", 16, -50 ,"mel")
-cough_to_midi_wavs(0.25, 0.25, 50, 'C2', 'C4', 16, -50, 'acc')
-cough_to_midi_wavs(0.3, 0.95, 50, 'C1', 'C3', 4, -50, 'bass')
 
+def cough2midi (cough_pth, motif_pth, threshold, freq_range_th, note_interval_th, min_target, max_target, energy_th):
+    normalize_wav_length(cough_pth, cough_pth, 4.0)
+    cough_data, sample_rate = audio.load_from_file(cough_pth)
+    cough_freq = freq.get_by_crepe(cough_data, sample_rate, threshold, energy_threshold=energy_th)
+    freq.write_midi(cough_data,sample_rate,cough_freq,motif_pth,min_target,max_target,freq_range_th,note_interval_th)
+    midi.to_2bars(motif_pth, motif_pth)  
+
+def correct_key(melody_pth, ref_pth):
+    midi.correct_midi_to_ref_key(ref_pth, melody_pth)
+            

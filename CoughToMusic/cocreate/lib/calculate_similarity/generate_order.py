@@ -7,7 +7,7 @@ def get_midi_files(folder_path, exclude_file):
     return [os.path.join(folder_path, f) for f in os.listdir(folder_path) 
             if f.endswith(".mid") and os.path.join(folder_path, f) != exclude_file]
 
-def generate_midi_sequence(midi_id, folder_path="./results/mel_mid"):
+def generate_midi_sequence(target_midi_file, folder_path):
     """
     Generate a sequence of similar MIDI files based on an input MIDI ID.
 
@@ -18,17 +18,12 @@ def generate_midi_sequence(midi_id, folder_path="./results/mel_mid"):
     Returns:
         list: Ordered sequence of MIDI file IDs.
     """
-    # Define target MIDI file
-    target_midi_file = os.path.join(folder_path, f"mel_{midi_id}.mid")
-
     # Load the target melody
     melody1 = MelodySegment(target_midi_file)
     melodies = [melody1]
     similarity_scores = []
-
     # Get all MIDI files excluding the target file
     midi_files = get_midi_files(folder_path, target_midi_file)
-
     # Compute similarity scores
     for midi_file2 in midi_files:
         melody2 = MelodySegment(midi_file2)

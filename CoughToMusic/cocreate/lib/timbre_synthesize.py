@@ -25,9 +25,9 @@ def get_instrument_settings(track, inst):
     }
     return settings[inst][track]
 
-def synthesize(track, track_id, inst, folder='tracks'):
-    midi_path = str(Path(folder) / f"{track}_mid" / f"{track}_{track_id}.mid")
-    output_path = str(Path(folder) / f"{track}_wav" / f"{track}_{track_id}.wav")
+def synthesize(track, inst, midi_path, output_path):
+    # midi_path = str(Path(folder) / f"{track}_mid" / f"{track}_{track_id}.mid")
+    # output_path = str(Path(folder) / f"{track}_wav" / f"{track}_{track_id}.wav")
 
     instrument, db, room_size, damping, wet_level = get_instrument_settings(track, inst)
     instrument_id = INST_NAME_TO_ID_DICT[instrument]
@@ -44,24 +44,37 @@ def synthesize(track, track_id, inst, folder='tracks'):
         Reverb(room_size=room_size, damping=damping, wet_level=wet_level),
     ])
     processed_audio = board(synthesized_audio, sample_rate=16000)
-    # save_wav(processed_audio, output_path)
+    save_wav(processed_audio, output_path)
     return processed_audio
     
 
-def generate_trio(inst, track_id, folder='tracks'):
-    mel = synthesize('mel', track_id, inst)
-    acc = synthesize('acc', track_id, inst)
-    bass = synthesize('bass', track_id, inst)
-    output_path = str(Path(folder) / f"trio_wav" / f"trio_{track_id}.wav")
-    # Ensure all tracks have the same length
-    max_length = max(len(mel), len(acc), len(bass))
-    mel = np.pad(mel, (0, max_length - len(mel)), 'constant')
-    acc = np.pad(acc, (0, max_length - len(acc)), 'constant')
-    bass = np.pad(bass, (0, max_length - len(bass)), 'constant')
-    # Merge the tracks
-    merged_audio = mel + acc + bass
-    # Save the merged audio to a WAV file
-    save_wav(merged_audio, output_path, sample_rate=16000)
+# def generate_trio(inst, track_id, folder='tracks'):
+#     mel = synthesize('mel', track_id, inst)
+#     acc = synthesize('acc', track_id, inst)
+#     bass = synthesize('bass', track_id, inst)
+#     output_path = str(Path(folder) / f"trio_wav" / f"trio_{track_id}.wav")
+#     # Ensure all tracks have the same length
+#     max_length = max(len(mel), len(acc), len(bass))
+#     mel = np.pad(mel, (0, max_length - len(mel)), 'constant')
+#     acc = np.pad(acc, (0, max_length - len(acc)), 'constant')
+#     bass = np.pad(bass, (0, max_length - len(bass)), 'constant')
+#     # Merge the tracks
+#     merged_audio = mel + acc + bass
+#     # Save the merged audio to a WAV file
+#     save_wav(merged_audio, output_path, sample_rate=16000)
 
-        
+def generate_trio(inst, midi_paths: dict, wav_paths: dict, merged_output_path, sample_rate=16000):
+    mel_audio = synthesize('mel', inst, midi_paths['mel'], wav_paths['mel'], sample_rate=sample_rate)
+    acc_audio = synthesize('acc', inst, midi_paths['acc'], wav_paths['acc'], sample_rate=sample_rate)
+    bass_audio = synthesize('bass', inst, midi_paths['bass'], wav_paths['bass'], sample_rate=sample_rate)
+
+    max_length = max(len(mel_audio), len(acc_audio), len(bass_audio))
+
+    mel_audio = np.pad(mel_audio, (0, max_length - len(mel_audio)), 'constant')
+    acc_audio = np.pad(acc_audio, (0, max_length - len(acc_audio)), 'constant')
+    bass_audio = np.pad(bass_audio, (0, max_length - len(bass_audio)), 'constant')
+
+    merged_audio = mel_audio + acc_audio + bass_audio
+
+    save_wav(merged_audio, merged_output_path, sample_rate=sample_rate)        
         

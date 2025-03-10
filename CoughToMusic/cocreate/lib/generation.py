@@ -109,14 +109,7 @@ def interpolate_melody_tensors(
 
 def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_path, target_duration=4.0):
     interp_note_seq = [normalize_sequence_duration(seq, target_duration) for seq in interp_note_seq]
-    # temp_dir = "temp"
-    # if not os.path.exists(temp_dir):
-    #     os.makedirs(temp_dir)
-    # print("Writing to MIDI...", end="")
-    # target_bpm = (
-    #     midi.get_tempo(start_midi_fp)
-    #     + midi.get_tempo(end_midi_fp)
-    # ) / 2
+
     if end_note_seq == None:
         all_seq = [start_note_seq] + interp_note_seq
         seq_durations = (
@@ -193,60 +186,122 @@ def drumify(s, temperature=1.0):
     decoded = groovae_2bar_tap.decode(encoding, length=32, temperature=temperature)
     return decoded[0]
 
-def generate_drum_seq(melody_seq, output_file_path):
-    def split_and_normalize_note_sequence(note_sequence, tpb, qpm):
-        ticks_per_two_bars = tpb * 4 * 2
-        seconds_per_tick = 60.0 / (qpm * tpb)
-        seconds_per_two_bars = ticks_per_two_bars * seconds_per_tick
+# def generate_drum_seq(melody_seq, output_file_path):
+#     def split_and_normalize_note_sequence(note_sequence, tpb, qpm):
+#         ticks_per_two_bars = tpb * 4 * 2
+#         seconds_per_tick = 60.0 / (qpm * tpb)
+#         seconds_per_two_bars = ticks_per_two_bars * seconds_per_tick
 
-        def create_segment_with_metadata(start_time, end_time):
-            segment = note_seq.NoteSequence()
-            segment.ticks_per_quarter = note_sequence.ticks_per_quarter
-            segment.time_signatures.extend(note_sequence.time_signatures)
-            segment.tempos.extend(note_sequence.tempos)
-            segment.total_time = min(
-                4, end_time - start_time
-            )  # Normalize total time to max 4 seconds per segment
-            segment.source_info.CopyFrom(note_sequence.source_info)
-            segment.instrument_infos.extend(note_sequence.instrument_infos)
-            for note in note_sequence.notes:
-                if note.start_time >= start_time and note.start_time < end_time:
-                    new_note = segment.notes.add()
-                    new_note.CopyFrom(note)
-                    new_note.start_time -= start_time
-                    new_note.end_time -= start_time
-            return segment
+#         def create_segment_with_metadata(start_time, end_time):
+#             segment = note_seq.NoteSequence()
+#             segment.ticks_per_quarter = note_sequence.ticks_per_quarter
+#             segment.time_signatures.extend(note_sequence.time_signatures)
+#             segment.tempos.extend(note_sequence.tempos)
+#             segment.total_time = min(
+#                 4, end_time - start_time
+#             )  # Normalize total time to max 4 seconds per segment
+#             segment.source_info.CopyFrom(note_sequence.source_info)
+#             segment.instrument_infos.extend(note_sequence.instrument_infos)
+#             for note in note_sequence.notes:
+#                 if note.start_time >= start_time and note.start_time < end_time:
+#                     new_note = segment.notes.add()
+#                     new_note.CopyFrom(note)
+#                     new_note.start_time -= start_time
+#                     new_note.end_time -= start_time
+#             return segment
 
-        total_duration = note_sequence.total_time
-        segments = []
-        current_start = 0
-        while current_start < total_duration:
-            current_end = min(current_start + seconds_per_two_bars, total_duration)
-            segment = create_segment_with_metadata(current_start, current_end)
-            segments.append(segment)
-            current_start = current_end
-        return segments
+#         total_duration = note_sequence.total_time
+#         segments = []
+#         current_start = 0
+#         while current_start < total_duration:
+#             current_end = min(current_start + seconds_per_two_bars, total_duration)
+#             segment = create_segment_with_metadata(current_start, current_end)
+#             segments.append(segment)
+#             current_start = current_end
+#         return segments
 
-    two_bar_segments = split_and_normalize_note_sequence(melody_seq, 220, 120)
-    midi_ls = []
-    for i, segment in enumerate(two_bar_segments):
-        print(f"\nSegment {i + 1} has {len(segment.notes)} notes")
-        # output_drum_path = f"temp/output_drum_sequence_{i}.mid"
-        output_drum_path = str(Path("temp") / f"output_drum_sequence_{i}.mid")
-        drum_seq = drumify(segment, temperature=1.0)
-        note_seq.sequence_proto_to_midi_file(drum_seq, output_drum_path)
-        midi_ls.append(output_drum_path)
-    midi.concatenate(midi_ls, output_file_path)
-    print("Drum sequence generated")
-    return md.MidiFile(output_file_path)
+#     two_bar_segments = split_and_normalize_note_sequence(melody_seq, 220, 120)
+#     midi_ls = []
+#     for i, segment in enumerate(two_bar_segments):
+#         print(f"\nSegment {i + 1} has {len(segment.notes)} notes")
+#         # output_drum_path = f"temp/output_drum_sequence_{i}.mid"
+#         output_drum_path = str(Path("temp") / f"output_drum_sequence_{i}.mid")
+#         drum_seq = drumify(segment, temperature=1.0)
+#         note_seq.sequence_proto_to_midi_file(drum_seq, output_drum_path)
+#         midi_ls.append(output_drum_path)
+#     midi.concatenate(midi_ls, output_file_path)
+#     print("Drum sequence generated")
+#     return md.MidiFile(output_file_path)
 
 # musicVAE interpolation functions
 
-def melody_interpolation(start_idx, end_idx, intp_idx , track, num_steps, is_first):
-    # start_midi_path = f"./results/{track}_mid/cough_{start_idx}.mid"
-    start_midi_path = str(Path("results") / f"{track}_mid" / f"{track}_{start_idx}.mid")
-    end_midi_path = str(Path("results") / f"{track}_mid" / f"{track}_{end_idx}.mid")
-    interp_output_path = str(Path("tracks") / f"{track}_mid" / f"{track}_{intp_idx}.mid")
+# def melody_interpolation(start_idx, end_idx, intp_idx , track, num_steps, is_first):
+#     # start_midi_path = f"./results/{track}_mid/cough_{start_idx}.mid"
+#     start_midi_path = str(Path("results") / f"{track}_mid" / f"{track}_{start_idx}.mid")
+#     end_midi_path = str(Path("results") / f"{track}_mid" / f"{track}_{end_idx}.mid")
+#     interp_output_path = str(Path("tracks") / f"{track}_mid" / f"{track}_{intp_idx}.mid")
+#     start_note_seq, end_note_seq = path_to_note_seq(start_midi_path, end_midi_path)
+#     interpolated_seq = interpolate_melody_tensors(
+#         start_note_seq, end_note_seq, num_steps, config_name="cat-mel_2bar_big"
+#     )
+#     if is_first == True:
+#         concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path)
+#     elif is_first == False:
+#         first_inp_mid = pretty_midi.PrettyMIDI(interp_output_path)
+#         first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
+#         concate_interpolation(first_inp_note_seq, end_note_seq, interpolated_seq, interp_output_path)
+#     elif is_first == None:
+#         first_inp_mid = pretty_midi.PrettyMIDI(interp_output_path)
+#         first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
+#         concate_interpolation(first_inp_note_seq, is_first, interpolated_seq, interp_output_path)
+#     interpolated_note_sequence = note_seq.midi_io.midi_file_to_note_sequence(interp_output_path)
+#     print("melody interpolate generated")
+#     # return interpolated_note_sequence
+
+
+
+
+
+# def drum_accompany(melody_seq, drum_output_path):
+#     drum_midi = generate_drum_seq(melody_seq, drum_output_path)
+#     print("Drum sequence generated")
+#     return drum_midi
+
+
+# mel_seq1 =  note_seq.midi_io.midi_file_to_note_sequence('./cough_to_midi/midis/cough_6.mid')
+# mel_seq2 =  note_seq.midi_io.midi_file_to_note_sequence('./cough_to_midi/midis/cough_1.mid')
+# mel_seq3 =  note_seq.midi_io.midi_file_to_note_sequence('./cough_to_midi/midis/cough_15_q.mid')
+
+# drum_accompany(mel_seq1, './temp/drum_output.mid')
+# drum_accompany(mel_seq2, './temp/drum_output2.mid')
+# drum_accompany(mel_seq3, './temp/drum_output3.mid')
+
+# def generate_melody_from_sequence(sequence, track, id):
+#     """Generates melodies based on the given order."""
+#     num_steps_map = {2: [3, 3], 3: [1, 1, 3], 4: [1, 1, 1, 1]}
+#     if len(sequence) not in num_steps_map:
+#         raise ValueError("Only sequences of length 2, 3, or 4 are supported.")
+#     num_steps = num_steps_map[len(sequence)]
+#     print(f"Generating melody for track: {track} with sequence {sequence}")
+#     # Generate interpolations in order
+#     for i in range(len(sequence)):
+#         start_idx = sequence[i]
+#         end_idx = sequence[(i + 1) % len(sequence)]
+#         is_first = True if i == 0 else (None if i == len(sequence) - 1 else False)
+#         melody_interpolation(start_idx, end_idx, id, track, num_steps[i], is_first)
+
+#     print("Melody generation completed.")
+        
+# melody_generation([16, 15, 1], 'bass', 1)
+
+# melody_interpolation('./cough_to_midi/midis/cough_8_q.mid', './cough_to_midi/midis/cough_5_q.mid', 'temp/interpolated_acc.mid', 3, True)
+# int_seq = note_seq.midi_io.midi_file_to_note_sequence('temp/interpolated.mid')
+# drum_accompany(int_seq, './temp/drum_output.mid')
+# drum_interpolation('results\drum_mid\drum_3.mid', 'results\drum_mid\drum_15.mid', 'tracks\drum_mid\drum_1.mid', 3, True)
+# drum_interpolation('results\drum_mid\drum_15.mid', 'results\drum_mid\drum_3.mid', 'tracks\drum_mid\drum_1.mid', 3, None)
+
+def melody_interpolation(start_midi_path, end_midi_path, interp_output_path , num_steps, is_first):
+
     start_note_seq, end_note_seq = path_to_note_seq(start_midi_path, end_midi_path)
     interpolated_seq = interpolate_melody_tensors(
         start_note_seq, end_note_seq, num_steps, config_name="cat-mel_2bar_big"
@@ -261,53 +316,21 @@ def melody_interpolation(start_idx, end_idx, intp_idx , track, num_steps, is_fir
         first_inp_mid = pretty_midi.PrettyMIDI(interp_output_path)
         first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
         concate_interpolation(first_inp_note_seq, is_first, interpolated_seq, interp_output_path)
-    interpolated_note_sequence = note_seq.midi_io.midi_file_to_note_sequence(interp_output_path)
+    note_seq.midi_io.midi_file_to_note_sequence(interp_output_path)
     print("melody interpolate generated")
     # return interpolated_note_sequence
 
 
-
-
-
-def drum_accompany(melody_seq, drum_output_path):
-    drum_midi = generate_drum_seq(melody_seq, drum_output_path)
-    print("Drum sequence generated")
-    return drum_midi
-
-
-# mel_seq1 =  note_seq.midi_io.midi_file_to_note_sequence('./cough_to_midi/midis/cough_6.mid')
-# mel_seq2 =  note_seq.midi_io.midi_file_to_note_sequence('./cough_to_midi/midis/cough_1.mid')
-# mel_seq3 =  note_seq.midi_io.midi_file_to_note_sequence('./cough_to_midi/midis/cough_15_q.mid')
-
-# drum_accompany(mel_seq1, './temp/drum_output.mid')
-# drum_accompany(mel_seq2, './temp/drum_output2.mid')
-# drum_accompany(mel_seq3, './temp/drum_output3.mid')
-
-def generate_melody_from_sequence(sequence, track, id):
+def generate_melody_from_sequence(sequence, interp_output_path):
     """Generates melodies based on the given order."""
     num_steps_map = {2: [3, 3], 3: [1, 1, 3], 4: [1, 1, 1, 1]}
-    
     if len(sequence) not in num_steps_map:
         raise ValueError("Only sequences of length 2, 3, or 4 are supported.")
-
     num_steps = num_steps_map[len(sequence)]
-
-    print(f"Generating melody for track: {track} with sequence {sequence}")
-
     # Generate interpolations in order
     for i in range(len(sequence)):
-        start_idx = sequence[i]
-        end_idx = sequence[(i + 1) % len(sequence)]
+        start_midi_path = sequence[i]
+        end_midi_path = sequence[(i + 1) % len(sequence)]
         is_first = True if i == 0 else (None if i == len(sequence) - 1 else False)
-        melody_interpolation(start_idx, end_idx, id, track, num_steps[i], is_first)
-
+        melody_interpolation(start_midi_path, end_midi_path, interp_output_path, num_steps[i], is_first)
     print("Melody generation completed.")
-        
-# melody_generation([16, 15, 1], 'bass', 1)
-
-# melody_interpolation('./cough_to_midi/midis/cough_8_q.mid', './cough_to_midi/midis/cough_5_q.mid', 'temp/interpolated_acc.mid', 3, True)
-# int_seq = note_seq.midi_io.midi_file_to_note_sequence('temp/interpolated.mid')
-# drum_accompany(int_seq, './temp/drum_output.mid')
-drum_interpolation('results\drum_mid\drum_3.mid', 'results\drum_mid\drum_15.mid', 'tracks\drum_mid\drum_1.mid', 3, True)
-
-drum_interpolation('results\drum_mid\drum_15.mid', 'results\drum_mid\drum_3.mid', 'tracks\drum_mid\drum_1.mid', 3, None)

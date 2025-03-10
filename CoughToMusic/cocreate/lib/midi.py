@@ -236,9 +236,9 @@ def to_2bars(ori_midi_path, preprocessed_midi_path, default_tempo=True):
                 new_track.append(MetaMessage('set_tempo', tempo=target_tempo))
 
     new_mid = adjust_ticks_per_beat(new_mid, 220)
-    # new_mid.save(preprocessed_midi_path)
-    # print(f"Converted {ori_midi_path} to {preprocessed_midi_path} with 2 bars, 120 QPM, and 220 ticks per quarter note.")
-    return new_mid
+    new_mid.save(preprocessed_midi_path)
+    print(f"Converted {ori_midi_path} to {preprocessed_midi_path} with 2 bars, 120 QPM, and 220 ticks per quarter note.")
+    # return new_mid
 
 #midi arrangement 
 
