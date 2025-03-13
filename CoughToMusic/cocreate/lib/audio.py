@@ -6,7 +6,6 @@ import math
 import noisereduce
 import pretty_midi
 from pydub import AudioSegment
-import soundfile as sf
 
 
 def load_from_dir(audio_path):
@@ -177,12 +176,3 @@ def remove_silence_from_end(audio_file, silence_threshold=-60.0, chunk_size=1):
             break
     audio_segment[:trim_ms].export(audio_file, format="wav")
 
-
-def full_length_fade(audio_np, mode):
-    total_length = len(audio_np)
-    if mode == "fade_in":
-        fade = np.linspace(0, 1, total_length)
-    elif mode == "fade_out":
-        fade = np.linspace(1, 0, total_length)
-    audio_np = audio_np * fade
-    return audio_np

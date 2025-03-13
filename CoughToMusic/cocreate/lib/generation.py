@@ -83,9 +83,9 @@ def normalize_sequence_duration(note_seq, target_duration=4.0):
 def interpolate_melody_tensors(
     start_note_seq, end_note_seq, num_steps, config_name, max_length=32, temperature=0.5):
     # model_path = f"./model/{config_name}/{config_name}.ckpt"
-    model_path = str(Path("model") / config_name / f"{config_name}.ckpt")
-    data_converter = configs.CONFIG_MAP[config_name].data_converter
-    music_vae = TrainedModel(configs.CONFIG_MAP[config_name], batch_size=4, checkpoint_dir_or_path=model_path)
+    model_path = str(Path("CoughToMusic/cocreate/model") / config_name / f"{config_name}.ckpt")
+    data_converter = configs.CONFIG_MAP["cat-mel_2bar_big"].data_converter
+    music_vae = TrainedModel(configs.CONFIG_MAP["cat-mel_2bar_big"], batch_size=4, checkpoint_dir_or_path=model_path)
     
 
     start_tensors = data_converter.from_tensors(data_converter.to_tensors(start_note_seq)[1])
@@ -96,8 +96,8 @@ def interpolate_melody_tensors(
 
     start_tensor = next((tensor for tensor in start_tensors if tensor.total_time >3.5), None)
     end_tensor = next((tensor for tensor in end_tensors if tensor.total_time >3.5), None)     
-    print("start_tensors:", start_tensors)
-    print("end_tensors", end_tensors)
+    # print("start_tensors:", start_tensors)
+    # print("end_tensors", end_tensors)
     note_sequences = music_vae.interpolate(
         start_tensor,
         end_tensor,

@@ -2,13 +2,8 @@ from midi_ddsp.utils.midi_synthesis_utils import synthesize_mono_midi, condition
 from midi_ddsp.midi_ddsp_synthesize import load_pretrained_model
 from midi_ddsp.data_handling.instrument_name_utils import INST_NAME_TO_ID_DICT
 from midi_ddsp.utils.audio_io import save_wav
-import tensorflow as tf
-from scipy.signal import resample
-from scipy.io.wavfile import write
+
 import numpy as np
-import pedalboard
-from pedalboard import Pedalboard, Chorus, Reverb, Gain, Phaser, Compressor
-from pathlib import Path
 
 def get_instrument_settings(track, inst):
     settings = {
@@ -25,11 +20,11 @@ def get_instrument_settings(track, inst):
     }
     return settings[inst][track]
 
-def synthesize(track, inst, midi_path, output_path):
-    # midi_path = str(Path(folder) / f"{track}_mid" / f"{track}_{track_id}.mid")
-    # output_path = str(Path(folder) / f"{track}_wav" / f"{track}_{track_id}.wav")
 
-    instrument, db, room_size, damping, wet_level = get_instrument_settings(track, inst)
+
+def synthesize(track, inst, midi_path, output_path):
+
+    instrument, Db, Room_size, Damping, Wet_level = get_instrument_settings(track, inst)
     instrument_id = INST_NAME_TO_ID_DICT[instrument]
 
     synthesis_generator, expression_generator = load_pretrained_model()
@@ -39,14 +34,13 @@ def synthesize(track, inst, midi_path, output_path):
     )
 
     synthesized_audio = midi_audio[0].numpy()
-    board = Pedalboard([
-        Gain(gain_db=db),
-        Reverb(room_size=room_size, damping=damping, wet_level=wet_level),
-    ])
-    processed_audio = board(synthesized_audio, sample_rate=16000)
-    save_wav(processed_audio, output_path)
-    return processed_audio
-    
+    # board = Pedalboard([
+    #     Gain(gain_db=Db),
+    #     Reverb(room_size=Room_size, damping=Damping, wet_level=Wet_level),
+    # ])
+    # processed_audio = board(synthesized_audio, sample_rate)
+    save_wav(synthesized_audio, output_path)
+    return synthesized_audio
 
 # def generate_trio(inst, track_id, folder='tracks'):
 #     mel = synthesize('mel', track_id, inst)
@@ -63,18 +57,46 @@ def synthesize(track, inst, midi_path, output_path):
 #     # Save the merged audio to a WAV file
 #     save_wav(merged_audio, output_path, sample_rate=16000)
 
-def generate_trio(inst, midi_paths: dict, wav_paths: dict, merged_output_path, sample_rate=16000):
-    mel_audio = synthesize('mel', inst, midi_paths['mel'], wav_paths['mel'], sample_rate=sample_rate)
-    acc_audio = synthesize('acc', inst, midi_paths['acc'], wav_paths['acc'], sample_rate=sample_rate)
-    bass_audio = synthesize('bass', inst, midi_paths['bass'], wav_paths['bass'], sample_rate=sample_rate)
-
+def generate_trio(inst, midi_paths: dict, wav_paths: dict, merged_output_path, sample_rate):
+    
+    print("mel_trk generating")
+    mel_audio = synthesize( 'mel', inst, midi_paths['mel'], wav_paths['mel'])
+    print("mel_trk generated")
+    print("acc_trk generating")
+    acc_audio = synthesize('acc', inst, midi_paths['acc'], wav_paths['acc'])
+    print("acc_trk generated")
+    print("bass_trk generating")
+    bass_audio = synthesize('bass', inst, midi_paths['bass'], wav_paths['bass'])
+    print("bass_trk generated")
     max_length = max(len(mel_audio), len(acc_audio), len(bass_audio))
-
     mel_audio = np.pad(mel_audio, (0, max_length - len(mel_audio)), 'constant')
     acc_audio = np.pad(acc_audio, (0, max_length - len(acc_audio)), 'constant')
     bass_audio = np.pad(bass_audio, (0, max_length - len(bass_audio)), 'constant')
-
     merged_audio = mel_audio + acc_audio + bass_audio
+    print(f'output path: {merged_output_path}')
+    save_wav(merged_audio, merged_output_path, sample_rate)        
 
-    save_wav(merged_audio, merged_output_path, sample_rate=sample_rate)        
-        
+
+
+# def generate_trio(inst, midi_paths: dict, wav_paths: dict):
+#     print(f"mel  path: {wav_paths['mel']}")
+#     mel_audio = synthesize(inst, midi_paths['mel'], wav_paths['mel'])
+#     print(f"mel_audio len: {len(mel_audio)}, min: {mel_audio.min()}, max: {mel_audio.max()}")
+
+#     # pedalboard_process(wav_paths['mel'], 7, 0.5, 0.3, 0.3)
+#     print("mel_trk generated")
+
+#     print("acc_trk generating")
+#     acc_audio = synthesize(inst, midi_paths['acc'], wav_paths['acc'])
+#     print(f"acc_audio len: {len(acc_audio)}, min: {acc_audio.min()}, max: {acc_audio.max()}")
+#     # pedalboard_process(wav_paths['acc'], 3, 0.4, 0.2, 0.2)
+#     print("acc_trk generated")
+
+#     print("bass_trk generating")
+#     bass_audio = synthesize(inst, midi_paths['bass'], wav_paths['bass'])
+#     print(f"bass_audio len: {len(bass_audio)}, min: {bass_audio.min()}, max: {bass_audio.max()}")
+#     # pedalboard_process(wav_paths['bass'], 4, 0.2, 0.2, 0.2)
+#     print("bass_trk generated")
+
+
+

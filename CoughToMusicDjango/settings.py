@@ -173,5 +173,7 @@ MOTIF_BASS_MID  = os.path.join(PUBLIC_MOTIF, 'bass_mid')
 os.makedirs(MOTIF_BASS_MID, exist_ok=True)
 MOTIF_DRUM_MID = os.path.join(PUBLIC_MOTIF, 'drum_mid')
 os.makedirs(MOTIF_DRUM_MID, exist_ok=True)
-IMPORT_COUGH_FOLDER = PUBLIC_MUSIC = os.path.join(MEDIA_ROOT, 'import_cough')
+
+IMPORT_COUGH_FOLDER  = os.path.join(MEDIA_ROOT, 'import_cough')
 os.makedirs(IMPORT_COUGH_FOLDER, exist_ok=True)
+

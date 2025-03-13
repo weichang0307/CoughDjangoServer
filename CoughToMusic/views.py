@@ -2,7 +2,7 @@ import os
 from django.views.decorators.csrf import csrf_exempt
 from .util import generate_music, save_pcm16_to_wav, init_user_folder, save_music_move
 from .table import update_user_table, init_user_table, init_cough_table, update_cough_table, init_music_table, update_music_table
-from .co_create_utils import generate_trio_mid, cough2midi, generate_trio_trk, id_to_pth
+from .co_create_utils import gen_trio_mid, cough2midi, gen_trio_trk, id_to_pth
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -732,7 +732,7 @@ def rename_music(request):
 
 
 @csrf_exempt
-def generate_music_from_cough(request):
+def generate_trio_from_cough(request):
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
@@ -760,14 +760,11 @@ def generate_music_from_cough(request):
                 return JsonResponse({'error': f'Cough with filename {filename} not found.'}, status=404)
 
             pubCoughID = str(cough_row.iloc[0]['pubCoughID'])  # Make sure it's a string if used as ID
-
+           
             # Step 3: Run the generation pipeline
             cough2midi(pubCoughID)
-            generate_trio_mid(pubCoughID)
-            generate_trio_trk(pubCoughID, instrument_type, sample_rate=sample_rate)
-
-            # Optionally return the path or URL of the generated audio
-            generated_audio_url = settings.MEDIA_URL + f'trio_wav/trio_{pubCoughID}.wav'
+            gen_trio_mid(pubCoughID)
+            generated_audio_url = gen_trio_trk(pubCoughID, instrument_type, sample_rate=sample_rate)
 
             return JsonResponse({
                 'message': 'Music generated successfully.',
