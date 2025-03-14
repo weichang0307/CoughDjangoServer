@@ -9,11 +9,11 @@ sys.path.append(str(BASE_DIR))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'CoughToMusicDjango.settings')
 django.setup()
 from django.conf import settings
-from cocreate.lib import cough2mid
-from cocreate.lib.calculate_similarity.generate_order import generate_midi_sequence
-from cocreate.lib.generation import generate_melody_from_sequence
-from cocreate.lib.timbre_synthesize import generate_trio  
-from cocreate.lib.drum import generate_drum_motif
+from .cocreate.lib import cough2mid
+from .cocreate.lib.calculate_similarity.generate_order import generate_midi_sequence
+from .cocreate.lib.generation import generate_melody_from_sequence
+from .cocreate.lib.timbre_synthesize import generate_trio  
+from .cocreate.lib.drum import generate_drum_motif
 # from cocreate.lib.audio import pedalboard_process
 
 
@@ -184,5 +184,5 @@ def pedalboard_process(path, DB, RS, DA, WET):
 
 
 
-pth = Path(r"C:\Users\JYWang\Desktop\CoughDjangoServer\media\public_music\mel_wav\mel_15.wav")
-pedalboard_process(pth, 7, 0.5, 0.3, 0.3 )
+# pth = Path(r"C:\Users\JYWang\Desktop\CoughDjangoServer\media\public_music\mel_wav\mel_15.wav")
+# pedalboard_process(pth, 7, 0.5, 0.3, 0.3 )

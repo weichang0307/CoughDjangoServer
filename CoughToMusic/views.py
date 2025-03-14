@@ -735,37 +735,41 @@ def rename_music(request):
 def generate_trio_from_cough(request):
     if request.method == 'POST':
         try:
-            data = json.loads(request.body)
+            # data = json.loads(request.body)
 
-            user_id = data.get('userId')
-            filename = data.get('filename')
-            instrument_type = data.get('instrumentType', 'string').lower()  # default to string instruments
-            sample_rate = data.get('sampleRate', 16000)
+            # user_id = data.get('userId')
+            # filename = data.get('filename')
+            # instrument_type = data.get('instrumentType', 'string').lower()  # default to string instruments
+            # sample_rate = data.get('sampleRate', 16000)
 
-            if not user_id or not filename:
-                return JsonResponse({'error': 'Missing userId or filename'}, status=400)
+            # if not user_id or not filename:
+            #     return JsonResponse({'error': 'Missing userId or filename'}, status=400)
 
-            # Step 1: Locate the cough_table.csv
-            cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
+            # # Step 1: Locate the cough_table.csv
+            # cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
 
-            if not os.path.exists(cough_table_path):
-                return JsonResponse({'error': f'Cough table {cough_table_path} not found.'}, status=400)
+            # if not os.path.exists(cough_table_path):
+            #     return JsonResponse({'error': f'Cough table {cough_table_path} not found.'}, status=400)
 
-            cough_df = pd.read_csv(cough_table_path)
+            # cough_df = pd.read_csv(cough_table_path)
 
-            # Step 2: Find the pubCoughID based on filename
-            cough_row = cough_df[cough_df['filename'] == filename]
+            # # Step 2: Find the pubCoughID based on filename
+            # cough_row = cough_df[cough_df['filename'] == filename]
 
-            if cough_row.empty:
-                return JsonResponse({'error': f'Cough with filename {filename} not found.'}, status=404)
+            # if cough_row.empty:
+            #     return JsonResponse({'error': f'Cough with filename {filename} not found.'}, status=404)
 
-            pubCoughID = str(cough_row.iloc[0]['pubCoughID'])  # Make sure it's a string if used as ID
-           
-            # Step 3: Run the generation pipeline
+            # pubCoughID = str(cough_row.iloc[0]['pubCoughID'])  # Make sure it's a string if used as ID
+
+            pubCoughID = 15    
+            instrument_type = 'string'
+            print("Calling cough2midi...")
             cough2midi(pubCoughID)
+            print("Calling gen_trio_mid...")
             gen_trio_mid(pubCoughID)
-            generated_audio_url = gen_trio_trk(pubCoughID, instrument_type, sample_rate=sample_rate)
-
+            print("Calling gen_trio_trk...")
+            generated_audio_url = gen_trio_trk(pubCoughID, instrument_type, sample_rate=16000)
+            print("Generated audio URL:", generated_audio_url)
             return JsonResponse({
                 'message': 'Music generated successfully.',
                 'pubCoughID': pubCoughID,
@@ -774,7 +778,9 @@ def generate_trio_from_cough(request):
 
         except Exception as e:
             print("Error: ", e)
+            import traceback; traceback.print_exc()
             return JsonResponse({'error': str(e)}, status=500)
+        
 
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 

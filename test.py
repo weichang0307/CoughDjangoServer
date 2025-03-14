@@ -1,33 +1,28 @@
-import os
-from django.conf import settings
+import requests
 
-# Setup Django environment if running outside of Django shell
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'CoughToMusicDjango.settings')
+def test_generate_trio_integration():
+    url = 'http://127.0.0.1:8000/generate_trio/'
 
-import django
-django.setup()
+    payload = {
+        'userId': 'test_user',
+        'filename': 'test_cough.wav',
+        'instrumentType': 'string',
+        'sampleRate': 16000
+    }
+    
+    response = requests.post(url, json=payload)
+    
+    print("Status code:", response.status_code)
+    print("Response body:", response.text)
+    
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
-\
-# Set test parameters
-pubCoughID = '1'  # Replace with an existing pubCoughID that has a cough wav in PUBLIC_COUGH
-instrument_type = 'string'  # or 'wind'
-sample_rate = 16000
+    data = response.json()
+    assert 'pubCoughID' in data
+    assert 'generated_audio_url' in data
 
-def run_test_pipeline(pubCoughID, instrument_type, sample_rate):
-    try:
-        print(f"Running cough2midi for pubCoughID={pubCoughID}")
-        cough2midi(pubCoughID)
+    print("Test passed!")
+    print(data)
 
-        print(f"Running generate_trio_mid for pubCoughID={pubCoughID}")
-        generate_trio_mid(pubCoughID)
-
-        print(f"Running generate_trio_trk for pubCoughID={pubCoughID}")
-        generate_trio_trk(pubCoughID, instrument_type, sample_rate=sample_rate)
-
-        print("✅ Pipeline test completed successfully.")
-
-    except Exception as e:
-        print(f"❌ Error during pipeline test: {e}")
-
-# Run it
-run_test_pipeline(pubCoughID, instrument_type, sample_rate)
+if __name__ == "__main__":
+    test_generate_trio_integration()

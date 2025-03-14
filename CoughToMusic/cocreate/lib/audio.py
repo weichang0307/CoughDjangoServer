@@ -6,6 +6,7 @@ import math
 import noisereduce
 import pretty_midi
 from pydub import AudioSegment
+import soundfile as sf
 
 
 def load_from_dir(audio_path):
