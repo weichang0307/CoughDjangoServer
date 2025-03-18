@@ -332,3 +332,36 @@ def note_shift(midi_file_path, desired_key):
     print(f"Interval to transpose: {transpose_interval.semitones} semitones ({transpose_interval.directedName})")
     transposed_stream = midi_stream.transpose(transpose_interval)
     transposed_stream.write('midi', fp=midi_file_path)
+
+
+def snap_on_grid_noteseq(midi_file_path, output_file_path, quantization_level):
+    # Load MIDI as NoteSequence
+    note_sequence = note_seq.midi_io.midi_file_to_note_sequence(midi_file_path)
+    
+    # Assume fixed QPM (or get from tempos)
+    qpm = note_sequence.tempos[0].qpm
+    seconds_per_beat = 60.0 / qpm
+    grid_interval = seconds_per_beat / (quantization_level / 4)
+    
+    print(f"Quantizing with qpm={qpm}, grid_interval={grid_interval}")
+    
+    # Iterate and quantize notes
+    for note in note_sequence.notes:
+        print(f"Original program: {note.program}, instrument: {note.instrument}, is_drum: {note.is_drum}")
+        print(f"Original start: {note.start_time}, end: {note.end_time}")
+        
+        new_start = round(note.start_time / grid_interval) * grid_interval
+        new_end = new_start +0.125
+        
+        
+        note.start_time = new_start
+        note.end_time = new_end
+        
+        print(f"New start: {note.start_time}, end: {note.end_time}")
+    
+    # Convert back to MIDI and save
+    quantized_midi = note_seq.midi_io.note_sequence_to_pretty_midi(note_sequence)
+    quantized_midi.write(output_file_path)
+    print(f"Quantized MIDI saved as {output_file_path}")
+
+# snap_on_grid_noteseq('./temp/dy_1.mid', './quantized_output.mid', 16)
