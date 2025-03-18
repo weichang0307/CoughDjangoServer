@@ -104,30 +104,108 @@ def select_related_drums(df, target_id):
             break
     return selected_coughs
 
-def write_midi_pretty(selected_coughs, df, folder_path, output_midi):
+# def write_midi_pretty(selected_coughs, df, folder_path, output_midi):
+#     midi = pretty_midi.PrettyMIDI()
+
+#     for drum_type, cough_id in selected_coughs.items():
+#         row = df[df["id"] == cough_id]
+#         if row.empty:
+#             print(f"Warning: No data found for ID {cough_id}")
+#             continue      
+
+#         audio_path = os.path.join(folder_path, f"cough_{cough_id}.wav")
+#         if not os.path.exists(audio_path):
+#             print(f"Warning: File {audio_path} not found.")
+#             continue
+
+#         audio_data, sr = librosa.load(audio_path, sr=None)
+#         onset_times = detect(audio_data, sr)
+
+#         drum_track = pretty_midi.Instrument(program=0, is_drum=True)
+#         for onset_time in onset_times:
+#             note = pretty_midi.Note(
+#                 velocity=VELOCITY_MAPPING.get(drum_type, 100),
+#                 pitch=DRUM_MAPPING.get(drum_type, 38),
+#                 start=onset_time,
+#                 end=onset_time + 0.05
+#             )
+#             drum_track.notes.append(note)
+
+#         midi.instruments.append(drum_track)
+
+#     midi.write(output_midi)
+#     print(f"MIDI file saved: {output_midi}")
+#     print(f"MIDI file saved: {output_midi}")
+
+def write_midi_pretty(selected_coughs, df, folder_path, output_midi, db_scale=15):
+    drum_mapping = {
+        "kick": 36,
+        "snare": 38,
+        "closed_hihat": 42,
+        "open_hihat": 46,
+        "mid_tom": 50,
+        "low_tom": 45,
+        "crash": 49
+    }
+    
+    velocity_mapping = {
+        "kick": 90,
+        "snare": 95,
+        "closed_hihat": 75,
+        "open_hihat": 80,
+        "mid_tom": 90,
+        "low_tom": 90,
+        "crash": 85
+    }
+    
     midi = pretty_midi.PrettyMIDI()
 
     for drum_type, cough_id in selected_coughs.items():
         row = df[df["id"] == cough_id]
         if row.empty:
-            print(f"Warning: No data found for ID {cough_id}")
-            continue      
+            continue
 
         audio_path = os.path.join(folder_path, f"cough_{cough_id}.wav")
         if not os.path.exists(audio_path):
-            print(f"Warning: File {audio_path} not found.")
             continue
 
-        audio_data, sr = librosa.load(audio_path, sr=None)
+        audio_data, sr = audio.load_from_file(audio_path)
         onset_times = detect(audio_data, sr)
+        onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
 
+        # Compute loudness for each onset event
+        onset_loudness = [compute_loudness(audio_data[int(start * sr):int(end * sr)]) 
+                          for start, end in zip(onset_times, offset_times)]
+
+        if not onset_loudness:
+            continue
+
+        baseline_loudness = np.mean(onset_loudness)
+        loudness_diffs = [loud - baseline_loudness for loud in onset_loudness]
+        actual_max_diff = max(abs(min(loudness_diffs)), abs(max(loudness_diffs)))
+        
+
+        # Create drum track
         drum_track = pretty_midi.Instrument(program=0, is_drum=True)
-        for onset_time in onset_times:
+
+        for onset_time, diff in zip(onset_times, loudness_diffs):
+
+
+            if actual_max_diff != 0:
+                normalized_diff = (diff / actual_max_diff) * scale
+            else:
+                normalized_diff = 0
+
+            base_velocity = velocity_mapping.get(drum_type, 90)
+
+            # Final velocity with normalization and clamping to MIDI range
+            final_velocity = int(np.clip(base_velocity + normalized_diff, 1, 127))
+
             note = pretty_midi.Note(
-                velocity=VELOCITY_MAPPING.get(drum_type, 100),
-                pitch=DRUM_MAPPING.get(drum_type, 38),
+                velocity=final_velocity,
+                pitch=drum_mapping.get(drum_type, 38),
                 start=onset_time,
-                end=onset_time + 0.05
+                end=onset_time + 0.125
             )
             drum_track.notes.append(note)
 
