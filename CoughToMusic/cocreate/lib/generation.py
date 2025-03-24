@@ -15,9 +15,12 @@ import note_seq
 import mido as md
 import midi
 from pathlib import Path
-
 from note_seq.protobuf import music_pb2
 
+"""
+HELPER FUNCTIONS
+
+"""
 def create_tensor_from_sequence(note_seq):
     new_note_sequence = music_pb2.NoteSequence()
     new_note_sequence.ticks_per_quarter = note_seq.ticks_per_quarter
@@ -52,24 +55,6 @@ def path_to_note_seq(midi_path_start, midi_path_end):
     print("Done")
     return start_note_seq, end_note_seq
 
-# def generate_16_mel():
-#     mel_16bar_models = {}
-#     hierdec_mel_16bar_config = configs.CONFIG_MAP["hierdec-mel_16bar"]
-#     model_path = "./model/hierdec-mel_16bar/hierdec-mel_16bar.ckpt"
-#     mel_16bar_models["hierdec_mel_16bar"] = TrainedModel(
-#         hierdec_mel_16bar_config, batch_size=4, checkpoint_dir_or_path=model_path
-#     )
-#     mel_sample_model = (
-#         "hierdec_mel_16bar"  # @param ["hierdec_mel_16bar", "baseline_flat_mel_16bar"]
-#     )
-#     temperature = 0.5  # @param {type:"slider", min:0.1, max:1.5, step:0.1}
-#     mel_16_samples = mel_16bar_models[mel_sample_model].sample(
-#         n=4, length=256, temperature=temperature
-#     )
-#     for i, ns in enumerate(mel_16_samples):
-#         mm.sequence_proto_to_midi_file(ns, f"./mel_16bar_{i}.mid")
-
-
 def normalize_sequence_duration(note_seq, target_duration=4.0):
     if note_seq.total_time < target_duration:
         time_padding = target_duration - note_seq.total_time
@@ -80,13 +65,50 @@ def normalize_sequence_duration(note_seq, target_duration=4.0):
     note_seq.total_time = target_duration
     return note_seq
 
+def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_path, target_duration=4.0):
+    interp_note_seq = [normalize_sequence_duration(seq, target_duration) for seq in interp_note_seq]
+
+    if end_note_seq == None:
+        all_seq = [start_note_seq] + interp_note_seq
+        seq_durations = (
+            [start_note_seq.total_time]
+            + [seq.total_time for seq in interp_note_seq]
+        )
+    else:
+        all_seq = [start_note_seq] + interp_note_seq + [end_note_seq] 
+        seq_durations =  (
+            [start_note_seq.total_time]
+            + [seq.total_time for seq in interp_note_seq]+ [end_note_seq.total_time]
+        )
+    final_seq = mm.sequences_lib.concatenate_sequences(all_seq, seq_durations)
+    mm.sequence_proto_to_midi_file(final_seq, output_path)
+    return print(f"Interpolated MIDI file has been saved to: {output_path}")
+
+"""MELODY GENERATION , MELODY INTERPOLATIOAN FUNCTIONS"""
+
+def generate_16_mel():
+    mel_16bar_models = {}
+    hierdec_mel_16bar_config = configs.CONFIG_MAP["hierdec-mel_16bar"]
+    model_path = "./model/hierdec-mel_16bar/hierdec-mel_16bar.ckpt"
+    mel_16bar_models["hierdec_mel_16bar"] = TrainedModel(
+        hierdec_mel_16bar_config, batch_size=4, checkpoint_dir_or_path=model_path
+    )
+    mel_sample_model = (
+        "hierdec_mel_16bar"  # @param ["hierdec_mel_16bar", "baseline_flat_mel_16bar"]
+    )
+    temperature = 0.5  # @param {type:"slider", min:0.1, max:1.5, step:0.1}
+    mel_16_samples = mel_16bar_models[mel_sample_model].sample(
+        n=4, length=256, temperature=temperature
+    )
+    for i, ns in enumerate(mel_16_samples):
+        mm.sequence_proto_to_midi_file(ns, f"./mel_16bar_{i}.mid")
+
 def interpolate_melody_tensors(
     start_note_seq, end_note_seq, num_steps, config_name, max_length=32, temperature=0.5):
     # model_path = f"./model/{config_name}/{config_name}.ckpt"
     model_path = str(Path("CoughToMusic/cocreate/model") / config_name / f"{config_name}.ckpt")
     data_converter = configs.CONFIG_MAP["cat-mel_2bar_big"].data_converter
     music_vae = TrainedModel(configs.CONFIG_MAP["cat-mel_2bar_big"], batch_size=4, checkpoint_dir_or_path=model_path)
-    
 
     start_tensors = data_converter.from_tensors(data_converter.to_tensors(start_note_seq)[1])
     # print(data_converter.to_tensors(start_note_seq))
@@ -107,31 +129,48 @@ def interpolate_melody_tensors(
     )
     return note_sequences
 
-def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_path, target_duration=4.0):
-    interp_note_seq = [normalize_sequence_duration(seq, target_duration) for seq in interp_note_seq]
+def melody_interpolation(start_midi_path, end_midi_path, interp_output_path , num_steps, is_first):
 
-    if end_note_seq == None:
-        all_seq = [start_note_seq] + interp_note_seq
-        seq_durations = (
-            [start_note_seq.total_time]
-            + [seq.total_time for seq in interp_note_seq]
-        )
-    else:
-        all_seq = [start_note_seq] + interp_note_seq + [end_note_seq] 
-        seq_durations =  (
-            [start_note_seq.total_time]
-            + [seq.total_time for seq in interp_note_seq]+ [end_note_seq.total_time]
-        )
-    
+    start_note_seq, end_note_seq = path_to_note_seq(start_midi_path, end_midi_path)
+    interpolated_seq = interpolate_melody_tensors(
+        start_note_seq, end_note_seq, num_steps, config_name="cat-mel_2bar_big"
+    )
+    if is_first == True:
+        concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path)
+    elif is_first == False:
+        first_inp_mid = pretty_midi.PrettyMIDI(interp_output_path)
+        first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
+        concate_interpolation(first_inp_note_seq, end_note_seq, interpolated_seq, interp_output_path)
+    elif is_first == None:
+        first_inp_mid = pretty_midi.PrettyMIDI(interp_output_path)
+        first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
+        concate_interpolation(first_inp_note_seq, is_first, interpolated_seq, interp_output_path)
+    note_seq.midi_io.midi_file_to_note_sequence(interp_output_path)
+    print("melody interpolate generated")
+    # return interpolated_note_sequence
 
-    final_seq = mm.sequences_lib.concatenate_sequences(all_seq, seq_durations)
-    mm.sequence_proto_to_midi_file(final_seq, output_path)
-    return print(f"Interpolated MIDI file has been saved to: {output_path}")
+
+def generate_melody_from_sequence(sequence, interp_output_path):
+    """Generates melodies based on the given order."""
+    num_steps_map = {2: [3, 3], 3: [1, 1, 3], 4: [1, 1, 1, 1]}
+    if len(sequence) not in num_steps_map:
+        raise ValueError("Only sequences of length 2, 3, or 4 are supported.")
+    num_steps = num_steps_map[len(sequence)]
+    # Generate interpolations in order
+    for i in range(len(sequence)):
+        start_midi_path = sequence[i]
+        end_midi_path = sequence[(i + 1) % len(sequence)]
+        is_first = True if i == 0 else (None if i == len(sequence) - 1 else False)
+        melody_interpolation(start_midi_path, end_midi_path, interp_output_path, num_steps[i], is_first)
+    print("Melody generation completed.")
+
+"""
+DRUM ACCOMPANIMENT GENERATION, DRUM INTERPOLATION , GENERATE GROOVE VARIATION FUNCTIONS"""
 
 def interpolate_drum_tensors(
     start_note_seq, end_note_seq, num_steps, max_length=32, temperature=0.5):
     # model_path = f"./model/drums_2bar_oh_hikl/drums_2bar_oh_hikl.ckpt"
-    model_path = str(Path("model") / "cat-drums_2bar_small.hikl" / "cat-drums_2bar_small.hikl.ckpt")
+    model_path = str(Path("CoughToMusic/cocreate/model") / "cat-drums_2bar_small.hikl" / "cat-drums_2bar_small.hikl.ckpt")
     drums_config = configs.CONFIG_MAP["cat-drums_2bar_small"]
     data_converter = drums_config.data_converter
     music_vae = TrainedModel(
@@ -179,12 +218,76 @@ def drumify(s, temperature=1.0):
         config_2bar_tap,
         1,
         # checkpoint_dir_or_path="./model/groovae_2bar_tap_fixed_velocity/model.ckpt-3668",
-        checkpoint_dir_or_path=str(Path("model") / "groovae_2bar_tap_fixed_velocity" / "model.ckpt-3668"),
+        checkpoint_dir_or_path=str(Path("CoughToMusic/cocreate/model") / "groovae_2bar_tap_fixed_velocity" / "model.ckpt-3668"),
         
     )
     encoding, mu, sigma = groovae_2bar_tap.encode([s])
     decoded = groovae_2bar_tap.decode(encoding, length=32, temperature=temperature)
     return decoded[0]
+
+
+def set_to_drums(ns):
+    for n in ns.notes:
+        n.instrument = 9
+        n.is_drum = True
+
+def start_notes_at_0(seq):
+    for n in seq.notes:
+        if n.start_time < 0:
+            n.end_time -= n.start_time
+            n.start_time = 0
+    return seq
+
+def change_tempo(note_sequence, new_tempo):
+    new_sequence = copy.deepcopy(note_sequence)
+    ratio = note_sequence.tempos[0].qpm / new_tempo
+    for note in new_sequence.notes:
+        note.start_time *= ratio
+        note.end_time *= ratio
+    new_sequence.tempos[0].qpm = new_tempo
+    return new_sequence
+
+def humanize(s, model, temperature=1):  
+    encoding, mu, sigma = model.encode([s])
+    decoded = model.decode(encoding, length=32, temperature=temperature)[0]
+    return change_tempo(decoded, s.tempos[0].qpm)
+
+def generate_humanize_groove(mid_pth, output_pth):
+    config_2_bar_humanize = configs.CONFIG_MAP['groovae_2bar_humanize']
+    model_path = str(Path("CoughToMusic/cocreate/model") / "groovae_2bar_humanize" / "model.ckpt-3061")
+    groovae_model = TrainedModel(config_2_bar_humanize, batch_size=1, checkpoint_dir_or_path=model_path)
+    origin_pm = pretty_midi.PrettyMIDI(mid_pth)
+    original_seq = mm.midi_to_note_sequence(origin_pm)
+    set_to_drums(original_seq)
+    q_ns = midi.snap_on_grid_noteseq(mid_pth, output_pth, 16)
+    humanized_seqs = [humanize(q_ns, groovae_model) for _ in range(3)]
+    
+    for seq in humanized_seqs:
+        for note in seq.notes:
+            note.velocity = min(note.velocity + 60, 127)
+
+    combined_seq = music_pb2.NoteSequence()
+    current_time = 0.0
+    # Add original sequence notes first
+    for note in original_seq.notes:
+        new_note = combined_seq.notes.add()
+        new_note.CopyFrom(note)
+        new_note.start_time += current_time
+        new_note.end_time += current_time
+    current_time = max(n.end_time for n in combined_seq.notes)
+    # Add the 3 humanized sequences one after another
+    for seq in humanized_seqs:
+        
+        for note in seq.notes:
+            new_note = combined_seq.notes.add()
+            new_note.CopyFrom(note)
+            new_note.start_time += current_time
+            new_note.end_time += current_time
+        current_time = max(n.end_time for n in combined_seq.notes)
+    combined_seq.tempos.add(qpm=original_seq.tempos[0].qpm if original_seq.tempos else 120.0)
+    
+    note_seq.sequence_proto_to_midi_file(combined_seq, output_pth)
+    print(f"Saved concatenated original + humanized drum MIDI to {output_pth}")
 
 # def generate_drum_seq(melody_seq, output_file_path):
 #     def split_and_normalize_note_sequence(note_sequence, tpb, qpm):
@@ -300,37 +403,3 @@ def drumify(s, temperature=1.0):
 # drum_interpolation('results\drum_mid\drum_3.mid', 'results\drum_mid\drum_15.mid', 'tracks\drum_mid\drum_1.mid', 3, True)
 # drum_interpolation('results\drum_mid\drum_15.mid', 'results\drum_mid\drum_3.mid', 'tracks\drum_mid\drum_1.mid', 3, None)
 
-def melody_interpolation(start_midi_path, end_midi_path, interp_output_path , num_steps, is_first):
-
-    start_note_seq, end_note_seq = path_to_note_seq(start_midi_path, end_midi_path)
-    interpolated_seq = interpolate_melody_tensors(
-        start_note_seq, end_note_seq, num_steps, config_name="cat-mel_2bar_big"
-    )
-    if is_first == True:
-        concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path)
-    elif is_first == False:
-        first_inp_mid = pretty_midi.PrettyMIDI(interp_output_path)
-        first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
-        concate_interpolation(first_inp_note_seq, end_note_seq, interpolated_seq, interp_output_path)
-    elif is_first == None:
-        first_inp_mid = pretty_midi.PrettyMIDI(interp_output_path)
-        first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
-        concate_interpolation(first_inp_note_seq, is_first, interpolated_seq, interp_output_path)
-    note_seq.midi_io.midi_file_to_note_sequence(interp_output_path)
-    print("melody interpolate generated")
-    # return interpolated_note_sequence
-
-
-def generate_melody_from_sequence(sequence, interp_output_path):
-    """Generates melodies based on the given order."""
-    num_steps_map = {2: [3, 3], 3: [1, 1, 3], 4: [1, 1, 1, 1]}
-    if len(sequence) not in num_steps_map:
-        raise ValueError("Only sequences of length 2, 3, or 4 are supported.")
-    num_steps = num_steps_map[len(sequence)]
-    # Generate interpolations in order
-    for i in range(len(sequence)):
-        start_midi_path = sequence[i]
-        end_midi_path = sequence[(i + 1) % len(sequence)]
-        is_first = True if i == 0 else (None if i == len(sequence) - 1 else False)
-        melody_interpolation(start_midi_path, end_midi_path, interp_output_path, num_steps[i], is_first)
-    print("Melody generation completed.")

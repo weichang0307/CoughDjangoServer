@@ -11,9 +11,11 @@ django.setup()
 from django.conf import settings
 from .cocreate.lib import cough2mid
 from .cocreate.lib.calculate_similarity.generate_order import generate_midi_sequence
-from .cocreate.lib.generation import generate_melody_from_sequence
+from .cocreate.lib.generation import generate_melody_from_sequence, generate_humanize_groove
 from .cocreate.lib.timbre_synthesize import generate_trio  
 from .cocreate.lib.drum import generate_drum_motif
+from .cocreate.lib import midi
+
 # from cocreate.lib.audio import pedalboard_process
 
 
@@ -143,46 +145,57 @@ def gen_trio_trk(id, inst, sample_rate=16000):
 # gen_trio_mid(15)
 # gen_trio_trk(15, 'string')
 
+def cough_to_drum_trk(id):
+    COUGH_PATH = os.path.join(settings.PUBLIC_COUGH, f'{id}.wav')
+    drum_mtf = id_to_pth(id, 'drum', 'mtf')
+    drum_mid = id_to_pth(id, 'drum', 'mid')
+    drum_trk = id_to_pth(id, 'drum', 'wav')
+    generate_drum_motif(settings.PUBLIC_COUGH, id, drum_mtf)
+    generate_humanize_groove(drum_mtf, drum_mid)
+    midi.write_from_midi(drum_mid, drum_trk)
+   
+    print("Cough to Drum Execution")
+
+cough_to_drum_trk(15)
+
+# import soundfile as sf
+# import pedalboard
+# from pedalboard import Pedalboard, Reverb, Gain
+# from pathlib import Path
+# import numpy as np
+# def pedalboard_process(path, DB, RS, DA, WET):
+#     try:
+
+#         reloaded_audio, sr = sf.read(path, dtype='float32')
+#         print(f"RELOADED AUDIO: {reloaded_audio.shape}, SR: {sr}")
+
+#         # Step 1: Reshape mono (1D) audio to (N, 1)
+#         if len(reloaded_audio.shape) == 1:
+#             reloaded_audio = reloaded_audio[:, np.newaxis]
+#             print(f"Reshaped mono audio to: {reloaded_audio.shape}")
+
+#         # Step 2: Duplicate mono to stereo if necessary
+#         if reloaded_audio.shape[1] == 1:
+#             reloaded_audio = np.repeat(reloaded_audio, 2, axis=1)
+#             print(f"Duplicated mono channel to stereo: {reloaded_audio.shape}")
+
+#         board = Pedalboard([
+#             Gain(gain_db=DB),
+#             Reverb(room_size=RS, damping=DA, wet_level=WET),
+#         ])
+#         print(f"PROCESSing WAV for at {path}")
 
 
-import soundfile as sf
-import pedalboard
-from pedalboard import Pedalboard, Reverb, Gain
-from pathlib import Path
-import numpy as np
-def pedalboard_process(path, DB, RS, DA, WET):
-    try:
+#         processed_audio = board(reloaded_audio, sample_rate=int(sr))
+#         print(f"Finished processing. Saving...")
 
-        reloaded_audio, sr = sf.read(path, dtype='float32')
-        print(f"RELOADED AUDIO: {reloaded_audio.shape}, SR: {sr}")
+#         sf.write(path, processed_audio, sr)
+#         print(f"SAVED WAV for at {path}")
 
-        # Step 1: Reshape mono (1D) audio to (N, 1)
-        if len(reloaded_audio.shape) == 1:
-            reloaded_audio = reloaded_audio[:, np.newaxis]
-            print(f"Reshaped mono audio to: {reloaded_audio.shape}")
-
-        # Step 2: Duplicate mono to stereo if necessary
-        if reloaded_audio.shape[1] == 1:
-            reloaded_audio = np.repeat(reloaded_audio, 2, axis=1)
-            print(f"Duplicated mono channel to stereo: {reloaded_audio.shape}")
-
-        board = Pedalboard([
-            Gain(gain_db=DB),
-            Reverb(room_size=RS, damping=DA, wet_level=WET),
-        ])
-        print(f"PROCESSing WAV for at {path}")
-
-
-        processed_audio = board(reloaded_audio, sample_rate=int(sr))
-        print(f"Finished processing. Saving...")
-
-        sf.write(path, processed_audio, sr)
-        print(f"SAVED WAV for at {path}")
-
-    except Exception as e:
-        print(f"pedalboard_process failed: {e}")
+#     except Exception as e:
+#         print(f"pedalboard_process failed: {e}")
 
 
 
-# pth = Path(r"C:\Users\JYWang\Desktop\CoughDjangoServer\media\public_music\mel_wav\mel_15.wav")
-# pedalboard_process(pth, 7, 0.5, 0.3, 0.3 )
+# # pth = Path(r"C:\Users\JYWang\Desktop\CoughDjangoServer\media\public_music\mel_wav\mel_15.wav")
+# # pedalboard_process(pth, 7, 0.5, 0.3, 0.3 )
