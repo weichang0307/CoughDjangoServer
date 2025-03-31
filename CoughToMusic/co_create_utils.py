@@ -11,21 +11,21 @@ django.setup()
 from django.conf import settings
 from .cocreate.lib import cough2mid
 from .cocreate.lib.calculate_similarity.generate_order import generate_midi_sequence
-from .cocreate.lib.generation import generate_melody_from_sequence, generate_humanize_groove
+from .cocreate.lib.generation import generate_melody_from_sequence, generate_humanize_groove, interpolated_groove
 from .cocreate.lib.timbre_synthesize import generate_trio  
-from .cocreate.lib.drum import generate_drum_motif
+from .cocreate.lib.drum import *
 from .cocreate.lib import midi
 
 # from cocreate.lib.audio import pedalboard_process
 
 
 MEL_CONFIG = {
-    "threshold": 0.3,
+    "threshold": 0.25,
     "freq_range_th": 0.2,
     "note_interval_th": 20,
     "min_target": "C3",
     "max_target": "C6",
-    "energy_th": -50,
+    "energy_th": -70,
 }
 
 ACC_CONFIG = {
@@ -34,7 +34,7 @@ ACC_CONFIG = {
     "note_interval_th": 50,
     "min_target": "C2",
     "max_target": "C4",
-    "energy_th": -50,
+    "energy_th": -60,
 }
 
 BASS_CONFIG = {
@@ -139,24 +139,63 @@ def gen_trio_trk(id, inst, sample_rate=16000):
     }
     merged_output_path = id_to_pth(id, 'trio', 'wav')
     generate_trio(inst, midi_paths, wav_paths, merged_output_path, sample_rate)
+    audio.gain_db_from_wav(merged_output_path, 7)
     return merged_output_path
 
-# cough2midi(15)
-# gen_trio_mid(15)
-# gen_trio_trk(15, 'string')
+
+cough2midi(24)
+gen_trio_mid(24)
+gen_trio_trk(24, 'string')
+
+def generate_groove_intp(folder_path, target_id):
+
+    drum_mid = id_to_pth(target_id, 'drum', 'mid') 
+    drum_trk = id_to_pth(target_id, 'drum', 'wav')
+
+    df = classify_coughs(normalize_and_rank(process_all_coughs(folder_path)))
+    cough7 = select_related_drums(df, target_id, 7)
+    tmp_first = 'tmp/first.mid'
+    tmp = 'tmp/tmp.mid'
+    tmp_last = 'tmp/last.mid'
+    tmp_last_2 = 'tmp/last_2.mid'
+    def save_midi(neg_offset, path):
+        subset = dict(list(cough7.items())[:neg_offset])
+        write_midi_pretty(subset, df, folder_path, path)
+        midi.adjust_to_2bars(path, path)
+        return path
+
+    tmp_first = save_midi(-6, tmp_first)  # 2 items (7 - 5)
+    tmp = save_midi(-4, tmp)          # 4 items (7 - 3)
+    tmp_last = save_midi(None, tmp_last)  # all 7
+    midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
+    midi.snap_on_grid_noteseq(tmp, tmp, 16)
+    midi.snap_on_grid_noteseq(tmp_last, tmp_last_2, 32)
+    midi.snap_on_grid_noteseq(tmp_last, tmp_last, 16)
+    midi.concatenate([tmp_first, tmp], tmp_first)
+    midi.concatenate([tmp_last, tmp_last_2], tmp_last)
+
+    interpolated_groove(tmp_first, tmp_last, drum_mid)
+    midi.write_from_midi(drum_mid, drum_trk)
+    print(f"Drum motif generation to {drum_mid} completed.")
+
+
+
+generate_groove_intp(settings.PUBLIC_COUGH, 24)
+
 
 def cough_to_drum_trk(id):
-    COUGH_PATH = os.path.join(settings.PUBLIC_COUGH, f'{id}.wav')
+    
     drum_mtf = id_to_pth(id, 'drum', 'mtf')
     drum_mid = id_to_pth(id, 'drum', 'mid')
     drum_trk = id_to_pth(id, 'drum', 'wav')
+    
     generate_drum_motif(settings.PUBLIC_COUGH, id, drum_mtf)
     generate_humanize_groove(drum_mtf, drum_mid)
     midi.write_from_midi(drum_mid, drum_trk)
    
     print("Cough to Drum Execution")
 
-cough_to_drum_trk(15)
+# cough_to_drum_trk(15)
 
 # import soundfile as sf
 # import pedalboard

@@ -62,6 +62,8 @@ def normalize_sequence_duration(note_seq, target_duration=4.0):
         silence_note.start_time = note_seq.total_time
         silence_note.end_time = target_duration
         silence_note.velocity = 0  # Add silence at the end
+    elif note_seq.total_time > target_duration:
+        note_seq = note_seq.trim(0, target_duration)
     note_seq.total_time = target_duration
     return note_seq
 
@@ -82,7 +84,37 @@ def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_
         )
     final_seq = mm.sequences_lib.concatenate_sequences(all_seq, seq_durations)
     mm.sequence_proto_to_midi_file(final_seq, output_path)
-    return print(f"Interpolated MIDI file has been saved to: {output_path}")
+    print(f"Interpolated MIDI file has been saved to: {output_path}")
+import random
+
+def ensure_min_note_density(note_seq, min_notes=5, total_time=4.0):
+    if len(note_seq.notes) >= min_notes:
+        return note_seq
+    
+    min_pitch =min(n.pitch for n in note_seq.notes)
+    max_pitch =max(n.pitch for n in note_seq.notes)
+    pitch_range = (min_pitch, max_pitch) if min_pitch < max_pitch else (0, 127)
+    # Collect existing note start times to avoid overlap
+    existing_times = {(n.start_time, n.pitch) for n in note_seq.notes}
+    
+    # Generate random non-overlapping notes
+    while len(note_seq.notes) < min_notes:
+        start = round(random.uniform(0, total_time - 0.1), 2)
+        duration = 0.0625
+        pitch = random.randint(*pitch_range)
+        if (start, pitch) in existing_times:
+            continue
+        note = note_seq.notes.add()
+        note.start_time = start
+        note.end_time = start + duration
+        note.pitch = pitch
+        note.velocity = 80
+        note.instrument = 0
+        note.program = 0
+        existing_times.add((start, pitch))
+
+    note_seq.total_time = max(note.end_time for note in note_seq.notes)
+    return note_seq
 
 """MELODY GENERATION , MELODY INTERPOLATIOAN FUNCTIONS"""
 
@@ -105,21 +137,37 @@ def generate_16_mel():
 
 def interpolate_melody_tensors(
     start_note_seq, end_note_seq, num_steps, config_name, max_length=32, temperature=0.5):
-    # model_path = f"./model/{config_name}/{config_name}.ckpt"
+
+    start_note_seq = ensure_min_note_density(start_note_seq, min_notes=5, total_time=4.0)
+    end_note_seq = ensure_min_note_density(end_note_seq, min_notes=5, total_time=4.0)
+
     model_path = str(Path("CoughToMusic/cocreate/model") / config_name / f"{config_name}.ckpt")
     data_converter = configs.CONFIG_MAP["cat-mel_2bar_big"].data_converter
     music_vae = TrainedModel(configs.CONFIG_MAP["cat-mel_2bar_big"], batch_size=4, checkpoint_dir_or_path=model_path)
 
-    start_tensors = data_converter.from_tensors(data_converter.to_tensors(start_note_seq)[1])
-    # print(data_converter.to_tensors(start_note_seq))
-    
-    end_tensors = data_converter.from_tensors(data_converter.to_tensors(end_note_seq)[1])
-    # print("start_noteseq:", start_note_seq)
+    s_input_output = data_converter.to_tensors(start_note_seq)
+    # print("s_input_output:", s_input_output)
+    s_tensors = s_input_output[0] if s_input_output[0] else s_input_output[1]
+    start_tensors = data_converter.from_tensors(s_tensors)
 
-    start_tensor = next((tensor for tensor in start_tensors if tensor.total_time >3.5), None)
-    end_tensor = next((tensor for tensor in end_tensors if tensor.total_time >3.5), None)     
-    # print("start_tensors:", start_tensors)
-    # print("end_tensors", end_tensors)
+    e_input_output = data_converter.to_tensors(end_note_seq)
+    # print("e_input_output:", e_input_output)
+    e_tensors = e_input_output[0] if e_input_output[0] else e_input_output[1]
+    end_tensors = data_converter.from_tensors(e_tensors)
+
+    # fallback if either list is empty
+    if not start_tensors and not end_tensors:
+        raise ValueError("Both start and end tensors are empty. Cannot interpolate.")
+    elif not start_tensors:
+        print("Start tensors empty. Using end tensor for both start and end.")
+        start_tensors = end_tensors
+    elif not end_tensors:
+        print("End tensors empty. Using start tensor for both start and end.")
+        end_tensors = start_tensors
+
+    start_tensor = next((t for t in start_tensors if t.total_time > 3.5), start_tensors[0])
+    end_tensor = next((t for t in end_tensors if t.total_time > 3.5), end_tensors[0])
+
     note_sequences = music_vae.interpolate(
         start_tensor,
         end_tensor,
@@ -128,6 +176,7 @@ def interpolate_melody_tensors(
         temperature=temperature,
     )
     return note_sequences
+
 
 def melody_interpolation(start_midi_path, end_midi_path, interp_output_path , num_steps, is_first):
 
@@ -180,8 +229,8 @@ def interpolate_drum_tensors(
     end_tensors = drums_config.data_converter.from_tensors(data_converter.to_tensors(end_note_seq)[1])
     # print("start_tensors:", start_tensors)
     # print("end_tensors", end_tensors)
-    start_tensor = next((tensor for tensor in start_tensors if tensor.total_time >3.5 ), None)
-    end_tensor = next((tensor for tensor in end_tensors if tensor.total_time >3.5), None)
+    start_tensor = next((tensor for tensor in start_tensors if tensor.total_time >3.5 ), start_tensors[0])
+    end_tensor = next((tensor for tensor in end_tensors if tensor.total_time >3.5), end_tensors[0])
     # print("start_tensors:", start_tensors)
     # print("end_tensors", end_tensors)
     note_sequences = music_vae.interpolate(
@@ -225,7 +274,6 @@ def drumify(s, temperature=1.0):
     decoded = groovae_2bar_tap.decode(encoding, length=32, temperature=temperature)
     return decoded[0]
 
-
 def set_to_drums(ns):
     for n in ns.notes:
         n.instrument = 9
@@ -249,18 +297,23 @@ def change_tempo(note_sequence, new_tempo):
 
 def humanize(s, model, temperature=1):  
     encoding, mu, sigma = model.encode([s])
-    decoded = model.decode(encoding, length=32, temperature=temperature)[0]
+    decoded = model.decode(encoding, length=32,  temperature=temperature )[0]
     return change_tempo(decoded, s.tempos[0].qpm)
 
 def generate_humanize_groove(mid_pth, output_pth):
+
     config_2_bar_humanize = configs.CONFIG_MAP['groovae_2bar_humanize']
+
     model_path = str(Path("CoughToMusic/cocreate/model") / "groovae_2bar_humanize" / "model.ckpt-3061")
     groovae_model = TrainedModel(config_2_bar_humanize, batch_size=1, checkpoint_dir_or_path=model_path)
     origin_pm = pretty_midi.PrettyMIDI(mid_pth)
     original_seq = mm.midi_to_note_sequence(origin_pm)
     set_to_drums(original_seq)
     q_ns = midi.snap_on_grid_noteseq(mid_pth, output_pth, 16)
-    humanized_seqs = [humanize(q_ns, groovae_model) for _ in range(3)]
+    humanized_seqs = []
+    for i in range(3):
+        seq = humanize(q_ns if i == 0 else humanized_seqs[i-1], groovae_model)
+        humanized_seqs.append(seq)
     
     for seq in humanized_seqs:
         for note in seq.notes:
@@ -288,6 +341,24 @@ def generate_humanize_groove(mid_pth, output_pth):
     
     note_seq.sequence_proto_to_midi_file(combined_seq, output_pth)
     print(f"Saved concatenated original + humanized drum MIDI to {output_pth}")
+
+
+def interpolated_groove(start_path, end_path, interp_output_path, steps =2):
+    config_4_bar = configs.CONFIG_MAP['groovae_4bar']
+    model_path = str(Path("CoughToMusic/cocreate/model") / "groovae_4bar" / "model.ckpt-2721")
+    groovae_model = TrainedModel(config_4_bar, batch_size=1, checkpoint_dir_or_path=model_path)
+    start_note_seq, end_note_seq = path_to_note_seq(start_path, end_path)
+    start_tensor = config_4_bar.data_converter.from_tensors(config_4_bar.data_converter.to_tensors(start_note_seq).outputs)[0]
+    end_tensor = config_4_bar.data_converter.from_tensors(config_4_bar.data_converter.to_tensors(end_note_seq).outputs)[0]   
+    interpolated_seq = groovae_model.interpolate(start_tensor, end_tensor, steps, length=64, temperature=1.5)
+    for seq in interpolated_seq:
+        for note in seq.notes:
+            note.velocity = min(note.velocity + 60, 127)
+
+    concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path, target_duration=8.0)
+
+  
+
 
 # def generate_drum_seq(melody_seq, output_file_path):
 #     def split_and_normalize_note_sequence(note_sequence, tpb, qpm):
@@ -400,6 +471,6 @@ def generate_humanize_groove(mid_pth, output_pth):
 # melody_interpolation('./cough_to_midi/midis/cough_8_q.mid', './cough_to_midi/midis/cough_5_q.mid', 'temp/interpolated_acc.mid', 3, True)
 # int_seq = note_seq.midi_io.midi_file_to_note_sequence('temp/interpolated.mid')
 # drum_accompany(int_seq, './temp/drum_output.mid')
-# drum_interpolation('results\drum_mid\drum_3.mid', 'results\drum_mid\drum_15.mid', 'tracks\drum_mid\drum_1.mid', 3, True)
-# drum_interpolation('results\drum_mid\drum_15.mid', 'results\drum_mid\drum_3.mid', 'tracks\drum_mid\drum_1.mid', 3, None)
+# drum_interpolation('media\public_music\drum_mid\drum_15.mid', 'media\public_music\drum_mid\drum_15.mid', 'media\public_music\drum_mid\k.mid', 3, True)
+# drum_interpolation('media\public_music\drum_mid\drum_15.mid', 'media\public_music\drum_mid\drum_15.mid', 'media\public_music\drum_mid\k.mid', 3, None)
 

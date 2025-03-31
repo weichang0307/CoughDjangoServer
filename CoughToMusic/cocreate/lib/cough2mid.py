@@ -10,12 +10,15 @@ from music21 import converter, key, interval
 import pretty_midi
 from pathlib import Path
 import librosa
-
+import audio
 def normalize_wav_length(input_path, output_path, target_length_sec):
+
     y, sr = librosa.load(input_path, sr=None)   
     target_length_samples = int(target_length_sec * sr)   
     y_resampled = librosa.util.fix_length(y, size=target_length_samples)  
     sf.write(output_path, y_resampled, sr)
+    audio.remove_silence_from_start(output_path, silence_threshold=-80.0, chunk_size=1) #trim the beginning of coughs
+    audio.padd_to_4_seconds(output_path)
 
 def cough_to_midi_wavs(
     threshold, freq_range_th, note_interval_th, min_target, max_target, energy_th, folder_path, out_dir):

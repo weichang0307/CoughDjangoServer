@@ -3,21 +3,40 @@ import networkx as nx
 def calculate_window_similarity(window1, window2, max_pitch_diff=36, max_transition_rate=30):
     overlap = max(0, min(window1['max_pitch'], window2['max_pitch']) - max(window1['min_pitch'], window2['min_pitch']))
     combined_range = max(window1['max_pitch'], window2['max_pitch']) - min(window1['min_pitch'], window2['min_pitch'])
-    range_similarity = overlap / combined_range if combined_range > 0 else 0
+    range_similarity = overlap / combined_range if combined_range > 0 else 1
 
-    avg_pitch_similarity = 1 - min(abs(window1['avg_pitch'] - window2['avg_pitch']) / max_pitch_diff, 1)
-    transition_rate_similarity = 1 - min(abs(window1['transition_rate'] - window2['transition_rate']) / max_transition_rate, 1)
+    pitch_diff = abs(window1['avg_pitch'] - window2['avg_pitch'])
+    avg_pitch_similarity = 1 - min(pitch_diff / max_pitch_diff, 1) if max_pitch_diff > 0 else 1
+
+    transition_diff = abs(window1['transition_rate'] - window2['transition_rate'])
+    transition_rate_similarity = 1 - min(transition_diff / max_transition_rate, 1) if max_transition_rate > 0 else 1
 
     max_note_density = max(window1['note_density'], window2['note_density'])
-    note_density_similarity = (min(window1['note_density'], window2['note_density']) / max_note_density) if max_note_density > 0 else 1
+    note_density_similarity = min(window1['note_density'], window2['note_density']) / max_note_density if max_note_density > 0 else 1
 
-    avg_duration_similarity = 1 - min(abs(window1['avg_duration'] - window2['avg_duration']) / max(window1['avg_duration'], window2['avg_duration']), 1)
-    max_duration_variability = max(window1['duration_variability'], window2['duration_variability'])
-    duration_variability_similarity = 1 - min(abs(window1['duration_variability'] - window2['duration_variability']) / max_duration_variability, 1) if max_duration_variability > 0 else 1
-    similarity = (0.3 * range_similarity + 0.2 * avg_pitch_similarity +
-                  0.2 * transition_rate_similarity + 0.1 * note_density_similarity +
-                  0.1 * avg_duration_similarity + 0.1 * duration_variability_similarity)
+    avg_dur1, avg_dur2 = window1['avg_duration'], window2['avg_duration']
+    dur_denom = max(avg_dur1, avg_dur2)
+    if dur_denom > 0:
+        avg_duration_similarity = 1 - min(abs(avg_dur1 - avg_dur2) / dur_denom, 1)
+    else:
+        avg_duration_similarity = 1
+
+    var1, var2 = window1['duration_variability'], window2['duration_variability']
+    max_var = max(var1, var2)
+    if max_var > 0:
+        duration_variability_similarity = 1 - min(abs(var1 - var2) / max_var, 1)
+    else:
+        duration_variability_similarity = 1
+
+    similarity = (0.3 * range_similarity +
+                  0.2 * avg_pitch_similarity +
+                  0.2 * transition_rate_similarity +
+                  0.1 * note_density_similarity +
+                  0.1 * avg_duration_similarity +
+                  0.1 * duration_variability_similarity)
+
     return similarity
+
 
 def calculate_motif_similarity(motif1, motif2):
     similarities = [calculate_window_similarity(w1, w2) for w1, w2 in zip(motif1, motif2)]

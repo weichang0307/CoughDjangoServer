@@ -89,6 +89,8 @@ def correct_midi_to_key(midi_data, tonic, scale_type, output_file):
     
 def correct_midi_to_ref_key(midi_ref, midi_fp):
     ref_tone, ref_mode = detect_key(midi_ref)
+    ref_tone = ref_tone.replace('-', '').replace('b', '').replace('#', '')
+
     print(ref_tone, ref_mode)
     midi_data = pretty_midi.PrettyMIDI(midi_fp)
     correct_midi_to_key(midi_data, ref_tone, ref_mode, midi_fp)
@@ -240,6 +242,46 @@ def to_2bars(ori_midi_path, preprocessed_midi_path, default_tempo=True):
     print(f"Converted {ori_midi_path} to {preprocessed_midi_path} with 2 bars, 120 QPM, and 220 ticks per quarter note.")
     # return new_mid
 
+
+def adjust_to_2bars(midi_file_path, output_file_path, ticks_per_beat=220, qpm=120):
+    """
+    Adjust a MIDI file to exactly 2 bars.
+    - If the MIDI file is shorter than 2 bars, pad it.
+    - If the MIDI file is longer than 2 bars, trim it.
+    """
+    # Load the MIDI file
+    midi = MidiFile(midi_file_path)
+    two_bar_ticks = int(4 * ticks_per_beat * 2)  # 2 bars = 4 beats per bar * 2 bars * ticks per beat
+
+    # Calculate the total ticks in the MIDI file
+    total_ticks = sum(msg.time for track in midi.tracks for msg in track if not msg.is_meta)
+
+    # Create a new MIDI file with the same ticks_per_beat
+    new_midi = MidiFile(ticks_per_beat=ticks_per_beat)
+    for track in midi.tracks:
+        new_track = MidiTrack()
+        new_midi.tracks.append(new_track)
+
+        current_ticks = 0
+        for msg in track:
+            if not msg.is_meta:
+                current_ticks += msg.time
+
+            # If the total ticks exceed 2 bars, trim
+            if current_ticks > two_bar_ticks:
+                break
+
+            new_track.append(msg)
+
+        # If the track is shorter than 2 bars, pad it
+        if current_ticks < two_bar_ticks:
+            padding_ticks = two_bar_ticks - current_ticks
+            new_track.append(MetaMessage('end_of_track', time=padding_ticks))
+
+    # Save the adjusted MIDI file
+    new_midi.save(output_file_path)
+    print(f"Adjusted MIDI saved to {output_file_path}")
+
 #midi arrangement 
 
 def concatenate(midi_files, output_file_path, tpb=220, qpm=120):
@@ -252,7 +294,7 @@ def concatenate(midi_files, output_file_path, tpb=220, qpm=120):
     for i, midi_file in enumerate(midi_files):
         print(f"prev_total_time {prev_total_time}")
         mid = mido.MidiFile(midi_file)
-        current_track = mid.tracks[2]
+        current_track = mid.tracks[1]
         track_time = 0
         offset = 0
         if i == 0:
@@ -344,7 +386,7 @@ def snap_on_grid_noteseq(midi_file_path, output_file_path, quantization_level):
     print(f"Quantizing with qpm={qpm}, grid_interval={grid_interval}")
     # Iterate and quantize notes
     for note in note_sequence.notes:
-        print(f"Original program: {note.program}, instrument: {note.instrument}, is_drum: {note.is_drum}")
+        # print(f"Original program: {note.program}, instrument: {note.instrument}, is_drum: {note.is_drum}")
         # print(f"Original start: {note.start_time}, end: {note.end_time}") 
         new_start = round(note.start_time / grid_interval) * grid_interval
         new_end = new_start +0.125

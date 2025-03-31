@@ -71,6 +71,11 @@ def get_tempo(audio_data, sample_rate):
     tempo = librosa.beat.tempo(onset_envelope=onset_env, sr=sample_rate, max_tempo=80)
     return tempo
 
+def gain_db_from_wav(audio_file, gain_db):
+    audio_segment = AudioSegment.from_wav(audio_file)
+    audio_segment = audio_segment + gain_db
+    audio_segment.export(audio_file, format="wav")
+
 
 
 
@@ -177,3 +182,10 @@ def remove_silence_from_end(audio_file, silence_threshold=-60.0, chunk_size=1):
             break
     audio_segment[:trim_ms].export(audio_file, format="wav")
 
+def padd_to_4_seconds(audio_file):
+    audio_segment = AudioSegment.from_wav(audio_file)
+    duration = len(audio_segment)
+    if duration < 4000:
+        silence = AudioSegment.silent(duration=4000 - duration)
+        audio_segment = audio_segment + silence
+        audio_segment.export(audio_file, format="wav")

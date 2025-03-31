@@ -77,16 +77,16 @@ def normalize_and_rank(df):
 def classify(duration_pct, loudness_pct):
     if duration_pct <= 0.4:
         return "closed_hihat" if loudness_pct <= 0.25 else "kick" if loudness_pct <= 0.6 else "snare"
-    elif duration_pct <= 0.8:
+    elif duration_pct <= 0.9:
         return "open_hihat" if loudness_pct <= 0.3 else "low_tom" if loudness_pct <= 0.66 else "mid_tom"
-    return "open_hihat" if loudness_pct <= 0.3 else "crash"
+    return "open_hihat" if loudness_pct <= 0.6 else "crash"
 
 def classify_coughs(df):
     df["drum"] = df.apply(lambda row: classify(row["duration_percentile"], row["loudness_percentile"]), axis=1)
     print(df)
     return df
 
-def select_related_drums(df, target_id):
+def select_related_drums(df, target_id, num ):
     if "drum" not in df.columns:
         raise ValueError("Missing 'drum' column.")
 
@@ -98,10 +98,11 @@ def select_related_drums(df, target_id):
     df_shuffled = df.sample(frac=1, random_state=random.randint(1, 1000))
 
     for _, row in df_shuffled.iterrows():
-        if row["drum"] not in selected_coughs:
-            selected_coughs[row["drum"]] = row["id"]
-        if len(selected_coughs) == 7:
+
+        if len(selected_coughs) == num:
             break
+        if row["drum"] not in selected_coughs:
+            selected_coughs[row["drum"]] = row["id"]       
     return selected_coughs
 
 # def write_midi_pretty(selected_coughs, df, folder_path, output_midi):
@@ -151,11 +152,11 @@ def write_midi_pretty(selected_coughs, df, folder_path, output_midi, db_scale=15
     velocity_mapping = {
         "kick": 90,
         "snare": 95,
-        "closed_hihat": 75,
-        "open_hihat": 80,
+        "closed_hihat": 80,
+        "open_hihat": 65,
         "mid_tom": 90,
         "low_tom": 90,
-        "crash": 85
+        "crash": 70
     }
     
     mid = pretty_midi.PrettyMIDI()
@@ -199,7 +200,10 @@ def write_midi_pretty(selected_coughs, df, folder_path, output_midi, db_scale=15
             drum_track.notes.append(note)
         mid.instruments.append(drum_track)
     mid.write(output_midi)
+    merge_midi_tracks(output_midi, output_midi)
     print(f"MIDI file saved: {output_midi}")
+    
+    
 
 def merge_midi_tracks(input_midi, output_midi):
     midi_data = pretty_midi.PrettyMIDI(input_midi)
@@ -223,7 +227,7 @@ def generate_drum_motif(folder_path, target_id, output_midi):
     df = process_all_coughs(folder_path)
     df = normalize_and_rank(df)
     df = classify_coughs(df)
-    selected_coughs = select_related_drums(df, target_id)
+    selected_coughs = select_related_drums(df, target_id, 7)
     print(f"Selected coughs: {selected_coughs}")
     write_midi_pretty(selected_coughs, df, folder_path, output_midi)
     
