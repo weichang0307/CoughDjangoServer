@@ -67,8 +67,21 @@ def normalize_sequence_duration(note_seq, target_duration=4.0):
     note_seq.total_time = target_duration
     return note_seq
 
+def concatenate_sequences(midi_path_start, midi_path_end, output_path):
+    start_note_seq, end_note_seq = path_to_note_seq(midi_path_start, midi_path_end)
+    
+    all_seq = [start_note_seq]  + [end_note_seq] 
+    # print(start_note_seq.total_time)
+    seq_durations =  (
+        [4.0]
+        + [end_note_seq.total_time]
+    )
+    final_seq = mm.sequences_lib.concatenate_sequences(all_seq, seq_durations)
+    mm.sequence_proto_to_midi_file(final_seq, output_path)
+    
 def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_path, target_duration=4.0):
     interp_note_seq = [normalize_sequence_duration(seq, target_duration) for seq in interp_note_seq]
+    # print(interp_note_seq)
 
     if end_note_seq == None:
         all_seq = [start_note_seq] + interp_note_seq
@@ -85,6 +98,7 @@ def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_
     final_seq = mm.sequences_lib.concatenate_sequences(all_seq, seq_durations)
     mm.sequence_proto_to_midi_file(final_seq, output_path)
     print(f"Interpolated MIDI file has been saved to: {output_path}")
+
 import random
 
 def ensure_min_note_density(note_seq, min_notes=5, total_time=4.0):
@@ -208,8 +222,11 @@ def generate_melody_from_sequence(sequence, interp_output_path):
     # Generate interpolations in order
     for i in range(len(sequence)):
         start_midi_path = sequence[i]
+        print("start_midi_path:", start_midi_path)
         end_midi_path = sequence[(i + 1) % len(sequence)]
+        print("end_midi_path:", end_midi_path)
         is_first = True if i == 0 else (None if i == len(sequence) - 1 else False)
+        print('f{num_steps[i]}:', num_steps[i])
         melody_interpolation(start_midi_path, end_midi_path, interp_output_path, num_steps[i], is_first)
     print("Melody generation completed.")
 
@@ -348,15 +365,20 @@ def interpolated_groove(start_path, end_path, interp_output_path, steps =2):
     model_path = str(Path("CoughToMusic/cocreate/model") / "groovae_4bar" / "model.ckpt-2721")
     groovae_model = TrainedModel(config_4_bar, batch_size=1, checkpoint_dir_or_path=model_path)
     start_note_seq, end_note_seq = path_to_note_seq(start_path, end_path)
+
     start_tensor = config_4_bar.data_converter.from_tensors(config_4_bar.data_converter.to_tensors(start_note_seq).outputs)[0]
+    # print(f'start_tensor: {start_tensor}')
+
     end_tensor = config_4_bar.data_converter.from_tensors(config_4_bar.data_converter.to_tensors(end_note_seq).outputs)[0]   
+    # print(f'end_tensor: {end_tensor}')
     interpolated_seq = groovae_model.interpolate(start_tensor, end_tensor, steps, length=64, temperature=1.5)
     for seq in interpolated_seq:
         for note in seq.notes:
-            note.velocity = min(note.velocity + 60, 127)
-
-    concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path, target_duration=8.0)
-
+            note.velocity = min(note.velocity + 55, 127)
+    # print(f"Interpolated drum sequence generated {len(interpolated_seq)}")
+    
+    # concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path, target_duration=8.0)
+    return interpolated_seq
   
 
 

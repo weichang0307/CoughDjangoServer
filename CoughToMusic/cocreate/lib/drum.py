@@ -15,8 +15,8 @@ DRUM_MAPPING = {
     "mid_tom": 48, "low_tom": 45, "crash": 49
 }
 VELOCITY_MAPPING = {
-    "kick": 95, "snare": 100, "closed_hihat": 80, "open_hihat": 85,
-    "mid_tom": 95, "low_tom": 95, "crash": 90
+    "kick": 95, "snare": 100, "closed_hihat": 80, "open_hihat": 75,
+    "mid_tom": 95, "low_tom": 95, "crash": 80
 }
 
 
@@ -138,7 +138,7 @@ def select_related_drums(df, target_id, num ):
 #     print(f"MIDI file saved: {output_midi}")
 #     print(f"MIDI file saved: {output_midi}")
 
-def write_midi_pretty(selected_coughs, df, folder_path, output_midi, db_scale=15):
+def write_midi_pretty(selected_coughs, df, folder_path, output_midi, db_scale=30):
     drum_mapping = {
         "kick": 36,
         "snare": 38,

@@ -29,6 +29,7 @@ def create_cough_audio(request):
             metadata_dict = json.loads(metadata)
             userid = metadata_dict.get('userId')
             filename = metadata_dict.get('fileName')
+            time = filename
             filename = os.path.join('', filename + '.wav')
             
             # 獲取上傳的音檔
@@ -68,11 +69,9 @@ def create_cough_audio(request):
     
                 # 儲存檔案
                 save_pcm16_to_wav(file_path_public, audio_data, sample_rate)
-            
-            current_datetime = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
             # 更新 cough_table.csv
-            cough_table_data = {'filename': filename, 'timestamp': datetime.datetime.now().timestamp(), 'pubCoughID' : file_count+1, 'time' : current_datetime}
+            cough_table_data = {'filename': filename, 'timestamp': datetime.datetime.now().timestamp(), 'pubCoughID' : file_count+1, 'time' : time}
             update_cough_table(userid, cough_table_data)
             
             # 假設音頻數據為 float32 格式的原始數據流

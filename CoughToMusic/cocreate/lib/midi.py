@@ -284,11 +284,11 @@ def adjust_to_2bars(midi_file_path, output_file_path, ticks_per_beat=220, qpm=12
 
 #midi arrangement 
 
-def concatenate(midi_files, output_file_path, tpb=220, qpm=120):
+def concatenate(midi_files, output_file_path, sec = 4.0, tpb=220, qpm=120):
     output = mido.MidiFile(ticks_per_beat=tpb)
     output_track = mido.MidiTrack()
     output.tracks.append(output_track)
-    two_bar_tick = int(4 * tpb * (qpm / 60))
+    two_bar_tick = int(sec * tpb * (qpm / 60))
     prev_total_time = 0
 
     for i, midi_file in enumerate(midi_files):
@@ -317,7 +317,7 @@ def concatenate(midi_files, output_file_path, tpb=220, qpm=120):
     output.save(output_file_path)
 
 def overlap_midi_files(mids, tpb):
-    combined_midi = md.MidiFile(ticks_per_beat=tpb)
+    combined_midi = mido.MidiFile(ticks_per_beat=tpb)
     for mid in mids:
         for track in mid.tracks:
             combined_midi.tracks.append(track)

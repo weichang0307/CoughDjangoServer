@@ -11,7 +11,7 @@ django.setup()
 from django.conf import settings
 from .cocreate.lib import cough2mid
 from .cocreate.lib.calculate_similarity.generate_order import generate_midi_sequence
-from .cocreate.lib.generation import generate_melody_from_sequence, generate_humanize_groove, interpolated_groove
+from .cocreate.lib.generation import generate_melody_from_sequence, generate_humanize_groove, interpolated_groove,path_to_note_seq, concatenate_sequences, concate_interpolation
 from .cocreate.lib.timbre_synthesize import generate_trio  
 from .cocreate.lib.drum import *
 from .cocreate.lib import midi
@@ -123,7 +123,7 @@ def gen_trio_mid(id):
         if trk != 'mel':
             ref_pth = id_to_pth(id, 'mel', 'mid')
             print(f"Correcting key for {ref_pth, intrp_mid_pth}")
-            cough2mid.correct_key(ref_pth,intrp_mid_pth)
+            # cough2mid.correct_key(ref_pth,intrp_mid_pth)
     print("Generate Trio Execution")
 
 def gen_trio_trk(id, inst, sample_rate=16000):
@@ -139,13 +139,13 @@ def gen_trio_trk(id, inst, sample_rate=16000):
     }
     merged_output_path = id_to_pth(id, 'trio', 'wav')
     generate_trio(inst, midi_paths, wav_paths, merged_output_path, sample_rate)
-    audio.gain_db_from_wav(merged_output_path, 7)
+    
     return merged_output_path
 
-
-cough2midi(24)
-gen_trio_mid(24)
-gen_trio_trk(24, 'string')
+ID = 61
+# cough2midi(ID)
+# gen_trio_mid(ID)
+# gen_trio_trk(ID, 'string')
 
 def generate_groove_intp(folder_path, target_id):
 
@@ -155,32 +155,37 @@ def generate_groove_intp(folder_path, target_id):
     df = classify_coughs(normalize_and_rank(process_all_coughs(folder_path)))
     cough7 = select_related_drums(df, target_id, 7)
     tmp_first = 'tmp/first.mid'
-    tmp = 'tmp/tmp.mid'
+    tmp_sec = 'tmp/sec.mid'
+    tmp_third = 'tmp/third.mid'
     tmp_last = 'tmp/last.mid'
-    tmp_last_2 = 'tmp/last_2.mid'
+    tmp_last2 = 'tmp/last2.mid'
     def save_midi(neg_offset, path):
         subset = dict(list(cough7.items())[:neg_offset])
         write_midi_pretty(subset, df, folder_path, path)
         midi.adjust_to_2bars(path, path)
         return path
 
-    tmp_first = save_midi(-6, tmp_first)  # 2 items (7 - 5)
-    tmp = save_midi(-4, tmp)          # 4 items (7 - 3)
-    tmp_last = save_midi(None, tmp_last)  # all 7
-    midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
-    midi.snap_on_grid_noteseq(tmp, tmp, 16)
-    midi.snap_on_grid_noteseq(tmp_last, tmp_last_2, 32)
-    midi.snap_on_grid_noteseq(tmp_last, tmp_last, 16)
-    midi.concatenate([tmp_first, tmp], tmp_first)
-    midi.concatenate([tmp_last, tmp_last_2], tmp_last)
+    tmp_first = save_midi(-6, tmp_first)  
+    tmp_sec = save_midi(-5, tmp_sec)  
+    tmp_third = save_midi(-4, tmp_third)       
+    tmp_last = save_midi(None, tmp_last)  
 
-    interpolated_groove(tmp_first, tmp_last, drum_mid)
+    midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
+    midi.snap_on_grid_noteseq(tmp_sec, tmp_sec, 32)
+    midi.snap_on_grid_noteseq(tmp_third, tmp_third, 16)
+    midi.snap_on_grid_noteseq(tmp_last, tmp_last, 32)
+    midi.concatenate([tmp_sec, tmp_third], tmp_third, sec = 4.0)
+    midi.concatenate([tmp_last, tmp_last], tmp_last2, sec = 4.0)
+
+    interpolated_seq = interpolated_groove(tmp_third, tmp_last2, drum_mid)
+    
+    start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
+    concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, drum_mid,  target_duration=8.0)
+    concatenate_sequences(tmp_first, drum_mid, drum_mid)
     midi.write_from_midi(drum_mid, drum_trk)
     print(f"Drum motif generation to {drum_mid} completed.")
 
-
-
-generate_groove_intp(settings.PUBLIC_COUGH, 24)
+generate_groove_intp(settings.PUBLIC_COUGH, ID)
 
 
 def cough_to_drum_trk(id):
