@@ -2,7 +2,7 @@ import os
 from django.views.decorators.csrf import csrf_exempt
 from .util import generate_music, save_pcm16_to_wav, init_user_folder, save_music_move
 from .table import update_user_table, init_user_table, init_cough_table, update_cough_table, init_music_table, update_music_table
-from .co_create_utils import gen_trio_mid, cough2midi, gen_trio_trk, id_to_pth
+from .co_create_utils import gen_trio_mid, cough2midi, gen_trio_trk, generate_groove_intp, save_final_cocreate
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -727,61 +727,97 @@ def rename_music(request):
 
 
         
-
-
-
 @csrf_exempt
 def generate_trio_from_cough(request):
     if request.method == 'POST':
         try:
-            # data = json.loads(request.body)
+            data = json.loads(request.body.decode("utf-8"))
+            print("data: ", data)
+            user_id = data['userId']
+            cough_path = data['coughPath']
+            uuid = data['uuid']
+            time_value = os.path.splitext(os.path.basename(cough_path))[0]
+            print(time_value)  # Output: 2025-04-07-16-30-10
 
-            # user_id = data.get('userId')
-            # filename = data.get('filename')
-            # instrument_type = data.get('instrumentType', 'string').lower()  # default to string instruments
-            # sample_rate = data.get('sampleRate', 16000)
+            user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_cocreate')
+            os.makedirs(user_tmp_folder, exist_ok=True)
 
-            # if not user_id or not filename:
-            #     return JsonResponse({'error': 'Missing userId or filename'}, status=400)
-
-            # # Step 1: Locate the cough_table.csv
-            # cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
-
-            # if not os.path.exists(cough_table_path):
-            #     return JsonResponse({'error': f'Cough table {cough_table_path} not found.'}, status=400)
-
-            # cough_df = pd.read_csv(cough_table_path)
-
-            # # Step 2: Find the pubCoughID based on filename
-            # cough_row = cough_df[cough_df['filename'] == filename]
-
-            # if cough_row.empty:
-            #     return JsonResponse({'error': f'Cough with filename {filename} not found.'}, status=404)
-
-            # pubCoughID = str(cough_row.iloc[0]['pubCoughID'])  # Make sure it's a string if used as ID
-
-            pubCoughID = 15    
+            # time_value = data.get('time')
             instrument_type = 'string'
-            print("Calling cough2midi...")
+
+            cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
+            if not os.path.exists(cough_table_path):
+                return JsonResponse({'error': f'Cough table not found for user {user_id}.'}, status=404)
+
+            df = pd.read_csv(cough_table_path)
+            match = df[df['time'] == time_value]
+            if match.empty:
+                return JsonResponse({'error': f'No entry found for time {time_value}.'}, status=404)
+
+            pubCoughID = int(match.iloc[0]['pubCoughID'])
+            print ("pubCoughID: ", pubCoughID)
+
             cough2midi(pubCoughID)
-            print("Calling gen_trio_mid...")
             gen_trio_mid(pubCoughID)
-            print("Calling gen_trio_trk...")
-            generated_audio_url = gen_trio_trk(pubCoughID, instrument_type, sample_rate=16000)
-            print("Generated audio URL:", generated_audio_url)
+            generate_path_trio = gen_trio_trk(pubCoughID, instrument_type,user_tmp_folder, sample_rate=16000)
+            generate_path_drum = generate_groove_intp(settings.PUBLIC_COUGH, pubCoughID, user_tmp_folder)
+
             return JsonResponse({
-                'message': 'Music generated successfully.',
-                'pubCoughID': pubCoughID,
-                'generated_audio_url': generated_audio_url
+                'generate_path_trio': generate_path_trio, 
+                'generate_path_drum': generate_path_drum
             }, status=200)
 
         except Exception as e:
-            print("Error: ", e)
             import traceback; traceback.print_exc()
             return JsonResponse({'error': str(e)}, status=500)
-        
-
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
+@csrf_exempt
+def get_music_cocreate(request):
+    if request.method == 'POST':
+        try:
+            # 準備回傳的音訊資料
+            audio_records = []
+            metadata_dict = json.loads(request.body)
+            userid = metadata_dict.get('userId')
+            upload_folder = os.path.join(settings.MEDIA_ROOT, userid, 'generated_music_cocreate')
+            
+            # 使用 os.walk() 遞迴遍歷資料夾
+            for root, dirs, files in os.walk(upload_folder):
+                for filename in files:
+                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
+                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
+                        print("relative_path: ", file_path)
+                        timestamp = os.path.getmtime(file_path)  # 檔案修改時間
+                        duration = "00:00"  # 可替換成實際計算的音訊時長邏輯
+                        
+                        # 建立音訊紀錄字典
+                        audio_record = {
+                            "filename": filename.replace('.wav', ''),
+                            "filePath": file_path,
+                            "timestamp": int(timestamp),
+                            "duration": duration
+                        }
+                        audio_records.append(audio_record)
 
+            return JsonResponse(audio_records, safe=False, status=200)
 
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+        
+@csrf_exempt 
+def save_music_cocreate(request):
+    if request.method == 'POST':
+        try:
+            metadata_dict = json.loads(request.body)
+            userid = metadata_dict.get('userId')
+            uuid = metadata_dict.get('uuid')
+            fileName = metadata_dict.get('fileName')
+            save_final_cocreate(userid, uuid, fileName)
+            return JsonResponse({'message': 'Save music successfully.'}, status=200)
+            
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+        
+    return JsonResponse({'error': 'Invalid request method'}, status=400)

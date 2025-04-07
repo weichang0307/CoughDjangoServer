@@ -57,7 +57,7 @@ def generate_music(user_id, cough_path, filename, bass_music = "tuba", alto_musi
 
 def save_music_move(user_id, filename, filename_display):
     """
-    修正後的 save_music_move，確保最內層的檔案名稱是 filename，而不是 uuid。
+    修正後的 save_music_move 確保最內層的檔案名稱是 filename 而不是 uuid。
     """
     print(f"save_music_move: {user_id}, {filename}, {filename_display}")
 
@@ -123,9 +123,11 @@ def init_user_folder(user_id):
     cough_folder = os.path.join(user_folder, 'cough_audio')
     generate_music_folder = os.path.join(user_folder, 'generated_music')
     generate_midi_folder = os.path.join(user_folder, 'generated_midi')
+    generate_cocreate_folder = os.path.join(user_folder, 'generated_music_cocreate')
     os.makedirs(cough_folder, exist_ok=True)
     os.makedirs(generate_music_folder, exist_ok=True)
     os.makedirs(generate_midi_folder, exist_ok=True)
+    os.makedirs(generate_cocreate_folder, exist_ok=True)
     
 
     

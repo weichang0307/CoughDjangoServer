@@ -2,7 +2,8 @@ import sys
 from pathlib import Path
 import os
 import django
-
+import shutil
+import datetime
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(BASE_DIR))
 
@@ -126,7 +127,7 @@ def gen_trio_mid(id):
             # cough2mid.correct_key(ref_pth,intrp_mid_pth)
     print("Generate Trio Execution")
 
-def gen_trio_trk(id, inst, sample_rate=16000):
+def gen_trio_trk(id, inst, user_folder,uuid, sample_rate=16000):
     midi_paths = {
         'mel': id_to_pth(id, 'mel', 'mid'),
         'acc': id_to_pth(id, 'acc', 'mid'),
@@ -137,20 +138,24 @@ def gen_trio_trk(id, inst, sample_rate=16000):
         'acc': id_to_pth(id, 'acc', 'wav'),
         'bass': id_to_pth(id, 'bass', 'wav')
     }
-    merged_output_path = id_to_pth(id, 'trio', 'wav')
+    # merged_output_path = id_to_pth(id, 'trio', 'wav')
+
+    merged_output_path = os.path.join(user_folder,  f'{uuid}_trio.wav')
+    # merged_output_path = os.path.join(user_folder, f'cocreate_{id}_trio.wav')
     generate_trio(inst, midi_paths, wav_paths, merged_output_path, sample_rate)
     
     return merged_output_path
 
-ID = 61
+# ID = 45
 # cough2midi(ID)
 # gen_trio_mid(ID)
 # gen_trio_trk(ID, 'string')
 
-def generate_groove_intp(folder_path, target_id):
-
+def generate_groove_intp(folder_path, target_id, user_folder, uuid):
     drum_mid = id_to_pth(target_id, 'drum', 'mid') 
-    drum_trk = id_to_pth(target_id, 'drum', 'wav')
+    # drum_trk = os.path.join(user_folder, f'cocreate_{uuid}_drum.wav')
+    drum_trk = os.path.join(user_folder, f'{uuid}_drum.wav')
+
 
     df = classify_coughs(normalize_and_rank(process_all_coughs(folder_path)))
     cough7 = select_related_drums(df, target_id, 7)
@@ -184,21 +189,99 @@ def generate_groove_intp(folder_path, target_id):
     concatenate_sequences(tmp_first, drum_mid, drum_mid)
     midi.write_from_midi(drum_mid, drum_trk)
     print(f"Drum motif generation to {drum_mid} completed.")
+    return drum_trk
 
-generate_groove_intp(settings.PUBLIC_COUGH, ID)
+# generate_groove_intp(settings.PUBLIC_COUGH, ID)
 
-
-def cough_to_drum_trk(id):
+# def cough_to_drum_trk(id):
     
-    drum_mtf = id_to_pth(id, 'drum', 'mtf')
-    drum_mid = id_to_pth(id, 'drum', 'mid')
-    drum_trk = id_to_pth(id, 'drum', 'wav')
+#     drum_mtf = id_to_pth(id, 'drum', 'mtf')
+#     drum_mid = id_to_pth(id, 'drum', 'mid')
+#     drum_trk = id_to_pth(id, 'drum', 'wav')
     
-    generate_drum_motif(settings.PUBLIC_COUGH, id, drum_mtf)
-    generate_humanize_groove(drum_mtf, drum_mid)
-    midi.write_from_midi(drum_mid, drum_trk)
+#     generate_drum_motif(settings.PUBLIC_COUGH, id, drum_mtf)
+#     generate_humanize_groove(drum_mtf, drum_mid)
+#     midi.write_from_midi(drum_mid, drum_trk)
    
-    print("Cough to Drum Execution")
+#     print("Cough to Drum Execution")
+
+def update_music_table(user_id, data):
+    music_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_music_cocreate')
+    os.makedirs(music_folder, exist_ok=True)
+    music_table_path = os.path.join(music_folder, 'cocreate_table.csv')
+
+    if not os.path.exists(music_table_path):
+        print(f"User table {music_table_path} does not exist.")
+        return
+
+    df = pd.read_csv(music_table_path)
+    new_row = pd.Series(data)
+    df = pd.concat([df, new_row.to_frame().T], ignore_index=True)
+    df.to_csv(music_table_path, index=False)
+
+def save_final_cocreate(user_id, uuid, filename_display):
+    """
+    修正後的 save_music_move 確保最內層的檔案名稱是 filename 而不是 uuid。
+    """
+    print(f"save_music_move: {user_id}, {uuid}, {filename_display}")
+
+    if not uuid or not filename_display:
+        print("Error: filename or filename_display is empty.")
+        return
+    
+    if not settings.MEDIA_ROOT:
+        raise ValueError("settings.MEDIA_ROOT is not set")
+    if not user_id:
+        raise ValueError("user_id is not provided")
+    
+    user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
+
+    ### 處理 generated_music 資料夾 ###
+    music_folder = os.path.join(user_folder, 'generated_music_cocreate')
+    os.makedirs(music_folder, exist_ok=True)
+    tmp_dir = os.path.join(user_folder, 'temp_cocreate')
+    new_music_folder = os.path.join(music_folder, filename_display)
+    os.makedirs(new_music_folder, exist_ok=True)
+
+    if os.path.exists(tmp_dir):
+        for file in os.listdir(tmp_dir):
+            if file.endswith("_drum.wav"):
+                drum_file_path = os.path.join(tmp_dir, file)
+                print(f"Drum file path: {drum_file_path}")
+                new_drum_file_path = os.path.join(new_music_folder, f"{filename_display}_drum.wav")
+                shutil.move(drum_file_path, new_drum_file_path)
+            elif file.endswith("_trio.wav"):
+                trio_file_path = os.path.join(tmp_dir, file)
+                print(f"Trio file path: {trio_file_path}")
+                new_trio_file_path = os.path.join(new_music_folder, f"{filename_display}_trio.wav")
+                shutil.move(trio_file_path, new_trio_file_path)
+        shutil.rmtree(tmp_dir)  
+    else:
+        print(f"Error: {tmp_dir} does not exist.")
+
+    # ### 處理 generated_midi 資料夾 ###
+    # midi_folder = os.path.join(user_folder, 'generated_midi')
+    # os.makedirs(midi_folder, exist_ok=True)
+
+    # old_midi_folder = os.path.join(user_folder, 'temp_midi', filename)
+    # new_midi_folder = os.path.join(midi_folder, filename_display)
+    # os.makedirs(new_midi_folder, exist_ok=True)
+
+    # if os.path.exists(old_midi_folder):
+    #     for file in os.listdir(old_midi_folder):
+    #         old_file_path = os.path.join(old_midi_folder, file)
+    #         substr = old_file_path.split('_')
+    #         new_file_path = os.path.join(new_midi_folder, f"{filename_display}_{substr[-1]}")
+    #         if file.endswith(".mid"):
+    #             shutil.move(old_file_path, new_file_path)
+    #     shutil.rmtree(old_midi_folder)  # 移動完畢後刪除空資料夾
+    # else:
+    #     print(f"Error: {old_midi_folder} does not exist.")
+
+    current_datetime = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    music_table_data = {"filename": filename_display, "timestamp": datetime.datetime.now().timestamp(), 'time' : current_datetime}
+    update_music_table(user_id, music_table_data)
+    print(f"✅ Successfully moved music & midi files for {filename_display}")
 
 # cough_to_drum_trk(15)
 
