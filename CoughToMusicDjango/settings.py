@@ -174,6 +174,15 @@ os.makedirs(MOTIF_BASS_MID, exist_ok=True)
 MOTIF_DRUM_MID = os.path.join(PUBLIC_MOTIF, 'drum_mid')
 os.makedirs(MOTIF_DRUM_MID, exist_ok=True)
 
+MOTIF_MEL_WAV = os.path.join(PUBLIC_MOTIF, 'mel_wav')
+os.makedirs(MOTIF_MEL_WAV, exist_ok=True)
+MOTIF_ACC_WAV = os.path.join(PUBLIC_MOTIF, 'acc_wav')
+os.makedirs(MOTIF_ACC_WAV, exist_ok=True)
+MOTIF_BASS_WAV = os.path.join(PUBLIC_MOTIF, 'bass_wav')
+os.makedirs(MOTIF_BASS_WAV, exist_ok=True)
+MOTIF_DRUM_WAV = os.path.join(PUBLIC_MOTIF, 'drum_wav')
+os.makedirs(MOTIF_DRUM_WAV, exist_ok=True)
+
 IMPORT_COUGH_FOLDER  = os.path.join(MEDIA_ROOT, 'import_cough')
 os.makedirs(IMPORT_COUGH_FOLDER, exist_ok=True)
 

@@ -181,7 +181,7 @@ def generate(request):
             )
             
             # Success response
-            return JsonResponse({'generate_path': generate_path}, status=200)
+            return JsonResponse({'generate_path': generate_path, 'cough_path': data['cough_path']}, status=200)
 
 @csrf_exempt        
 def sign_up(request):
@@ -757,13 +757,15 @@ def generate_trio_from_cough(request):
             pubCoughID = int(match.iloc[0]['pubCoughID'])
             print ("pubCoughID: ", pubCoughID)
 
-            cough2midi(pubCoughID)
-            gen_trio_mid(pubCoughID)
-            generate_path_trio = gen_trio_trk(pubCoughID, instrument_type,user_tmp_folder, sample_rate=16000)
-            generate_path_drum = generate_groove_intp(settings.PUBLIC_COUGH, pubCoughID, user_tmp_folder)
+            # generate_path_triomotif = cough2midi(pubCoughID, instrument_type, user_tmp_folder, uuid, sample_rate=16000)
+            # gen_trio_mid(pubCoughID)
+            # generate_path_trio = gen_trio_trk(pubCoughID, instrument_type,user_tmp_folder,uuid,  sample_rate=16000)
+            generate_path_drummotif, generate_path_drum = generate_groove_intp(settings.PUBLIC_COUGH, pubCoughID, user_tmp_folder, uuid)
 
             return JsonResponse({
-                'generate_path_trio': generate_path_trio, 
+                # 'generate_path_triomotif': generate_path_triomotif,
+                # 'generate_path_trio': generate_path_trio, 
+                'generate_path_drummotif': generate_path_drummotif,
                 'generate_path_drum': generate_path_drum
             }, status=200)
 

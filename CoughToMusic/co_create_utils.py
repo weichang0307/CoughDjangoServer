@@ -18,15 +18,13 @@ from .cocreate.lib.drum import *
 from .cocreate.lib import midi
 
 # from cocreate.lib.audio import pedalboard_process
-
-
 MEL_CONFIG = {
     "threshold": 0.25,
     "freq_range_th": 0.2,
     "note_interval_th": 20,
     "min_target": "C3",
     "max_target": "C6",
-    "energy_th": -70,
+    "energy_th": -1000 #-70,
 }
 
 ACC_CONFIG = {
@@ -35,7 +33,7 @@ ACC_CONFIG = {
     "note_interval_th": 50,
     "min_target": "C2",
     "max_target": "C4",
-    "energy_th": -60,
+    "energy_th":-1000 # -60,
 }
 
 BASS_CONFIG = {
@@ -44,23 +42,23 @@ BASS_CONFIG = {
     "note_interval_th": 50,
     "min_target": "C1",
     "max_target": "C3",
-    "energy_th": -50,
+    "energy_th": -1000 #-50,
 }
 
-def get_instrument_settings(track, inst):
-    settings = {
-        'string': {
-            'mel': ('violin', 7, 0.5, 0.3, 0.3),
-            'acc': ('cello', 3, 0.4, 0.2, 0.2),
-            'bass': ('double bass', 4, 0.2, 0.2, 0.2)
-        },
-        'wind': {
-            'mel': ('flute', 7, 0.5, 0.3, 0.3),
-            'acc': ('clarinet', 3, 0.4, 0.2, 0.2),
-            'bass': ('french horn', 4, 0.2, 0.2, 0.2)
-        }
-    }
-    return settings[inst][track]
+# def get_instrument_settings(track, inst):
+#     settings = {
+#         'string': {
+#             'mel': ('violin', 7, 0.5, 0.3, 0.3),
+#             'acc': ('cello', 3, 0.4, 0.2, 0.2),
+#             'bass': ('double bass', 4, 0.2, 0.2, 0.2)
+#         },
+#         'wind': {
+#             'mel': ('flute', 7, 0.5, 0.3, 0.3),
+#             'acc': ('clarinet', 3, 0.4, 0.2, 0.2),
+#             'bass': ('french horn', 4, 0.2, 0.2, 0.2)
+#         }
+#     }
+#     return settings[inst][track]
     
 def id_to_pth(id, track, music_motif):
     if music_motif == 'mtf':
@@ -92,14 +90,24 @@ def id_to_pth(id, track, music_motif):
             return os.path.join(settings.TRACK_BASS_WAV, f'bass_{id}.wav')
         elif track == 'drum':
             return os.path.join(settings.TRACK_DRUM_WAV, f'drum_{id}.wav')
-        elif track == 'trio':
-            return os.path.join(settings.TRACK_TRIO_WAV, f'trio_{id}.wav')
+        
+    elif music_motif == 'mtf_wav':
+        if track == 'mel':
+            return os.path.join(settings.MOTIF_MEL_WAV, f'mel_{id}.wav')
+        elif track == 'acc':
+            return os.path.join(settings.MOTIF_ACC_WAV, f'acc_{id}.wav')
+        elif track == 'bass':
+            return os.path.join(settings.MOTIF_BASS_WAV, f'bass_{id}.wav')
+        elif track == 'drum':
+            return os.path.join(settings.MOTIF_DRUM_WAV, f'drum_{id}.wav')
+        # elif track == 'trio':
+        #     return os.path.join(settings.TRACK_TRIO_WAV, f'trio_{id}.wav')
 
     # fallback: raise an exception if no match
     raise ValueError(f"No path matched for track='{track}', music_motif='{music_motif}'")
 
 
-def cough2midi(id):
+def cough2midi(id, inst, user_folder, uuid, sample_rate=16000):
     COUGH_PATH = os.path.join(settings.PUBLIC_COUGH, f'{id}.wav')
     mel_mtf = id_to_pth(id, 'mel', 'mtf')
     acc_mtf = id_to_pth(id, 'acc', 'mtf')
@@ -110,7 +118,20 @@ def cough2midi(id):
     cough2mid.correct_key(acc_mtf,acc_mtf)
     cough2mid.cough2midi(COUGH_PATH, bass_mtf, **BASS_CONFIG)
     cough2mid.correct_key(bass_mtf,bass_mtf)
+    midi_paths = {
+        'mel': mel_mtf,
+        'acc': acc_mtf,
+        'bass': bass_mtf
+    }
+    wav_paths = {
+        'mel': id_to_pth(id, 'mel', 'mtf_wav'),
+        'acc': id_to_pth(id, 'acc', 'mtf_wav'),
+        'bass': id_to_pth(id, 'bass', 'mtf_wav')
+    }
+    merged_output_path = os.path.join(user_folder,  f'{uuid}_triomotif.wav')
+    generate_trio(inst, midi_paths, wav_paths, merged_output_path, sample_rate)
     print("Cough to mid Execution")
+    return merged_output_path
 
 def gen_trio_mid(id):
     tracks = ['mel', 'acc', 'bass']
@@ -155,6 +176,7 @@ def generate_groove_intp(folder_path, target_id, user_folder, uuid):
     drum_mid = id_to_pth(target_id, 'drum', 'mid') 
     # drum_trk = os.path.join(user_folder, f'cocreate_{uuid}_drum.wav')
     drum_trk = os.path.join(user_folder, f'{uuid}_drum.wav')
+    drum_motif_trk =os.path.join(user_folder, f'{uuid}_drummotif.wav')
 
 
     df = classify_coughs(normalize_and_rank(process_all_coughs(folder_path)))
@@ -170,10 +192,11 @@ def generate_groove_intp(folder_path, target_id, user_folder, uuid):
         midi.adjust_to_2bars(path, path)
         return path
 
-    tmp_first = save_midi(-6, tmp_first)  
+    tmp_first = save_midi(-6, tmp_first)
     tmp_sec = save_midi(-5, tmp_sec)  
     tmp_third = save_midi(-4, tmp_third)       
     tmp_last = save_midi(None, tmp_last)  
+    midi.write_from_midi(tmp_first, drum_motif_trk)
 
     midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
     midi.snap_on_grid_noteseq(tmp_sec, tmp_sec, 32)
@@ -189,7 +212,7 @@ def generate_groove_intp(folder_path, target_id, user_folder, uuid):
     concatenate_sequences(tmp_first, drum_mid, drum_mid)
     midi.write_from_midi(drum_mid, drum_trk)
     print(f"Drum motif generation to {drum_mid} completed.")
-    return drum_trk
+    return drum_motif_trk, drum_trk
 
 # generate_groove_intp(settings.PUBLIC_COUGH, ID)
 
@@ -250,11 +273,16 @@ def save_final_cocreate(user_id, uuid, filename_display):
                 print(f"Drum file path: {drum_file_path}")
                 new_drum_file_path = os.path.join(new_music_folder, f"{filename_display}_drum.wav")
                 shutil.move(drum_file_path, new_drum_file_path)
+            elif file.endswith("_drummotif.wav"):
+                drum_file_path = os.path.join(tmp_dir, file)
+                print(f"Drum motif file path: {drum_file_path}")
+                new_drum_file_path = os.path.join(new_music_folder, f"{filename_display}_drummotif.wav")
             elif file.endswith("_trio.wav"):
                 trio_file_path = os.path.join(tmp_dir, file)
                 print(f"Trio file path: {trio_file_path}")
                 new_trio_file_path = os.path.join(new_music_folder, f"{filename_display}_trio.wav")
                 shutil.move(trio_file_path, new_trio_file_path)
+            
         shutil.rmtree(tmp_dir)  
     else:
         print(f"Error: {tmp_dir} does not exist.")

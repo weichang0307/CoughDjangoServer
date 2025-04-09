@@ -101,7 +101,7 @@ def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_
 
 import random
 
-def ensure_min_note_density(note_seq, min_notes=5, total_time=4.0):
+def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
     if len(note_seq.notes) >= min_notes:
         return note_seq
     
@@ -114,7 +114,7 @@ def ensure_min_note_density(note_seq, min_notes=5, total_time=4.0):
     # Generate random non-overlapping notes
     while len(note_seq.notes) < min_notes:
         start = round(random.uniform(0, total_time - 0.1), 2)
-        duration = 0.0625
+        duration = 0.25
         pitch = random.randint(*pitch_range)
         if (start, pitch) in existing_times:
             continue
@@ -128,6 +128,7 @@ def ensure_min_note_density(note_seq, min_notes=5, total_time=4.0):
         existing_times.add((start, pitch))
 
     note_seq.total_time = max(note.end_time for note in note_seq.notes)
+    print(f'modify to {len(note_seq.notes)}' )
     return note_seq
 
 """MELODY GENERATION , MELODY INTERPOLATIOAN FUNCTIONS"""

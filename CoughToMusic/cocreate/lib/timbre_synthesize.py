@@ -61,14 +61,16 @@ def generate_trio(inst, midi_paths: dict, wav_paths: dict, merged_output_path, s
     
     print("mel_trk generating")
     mel_audio = synthesize( 'mel', inst, midi_paths['mel'], wav_paths['mel'])
-    audio.gain_db_from_wav(wav_paths['mel'], 7)
+    audio.gain_db_from_wav(wav_paths['mel'], 15)
     print("mel_trk generated")
     print("acc_trk generating")
     acc_audio = synthesize('acc', inst, midi_paths['acc'], wav_paths['acc'])
+    audio.gain_db_from_wav(wav_paths['acc'], 3)
     print("acc_trk generated")
+
     print("bass_trk generating")
     bass_audio = synthesize('bass', inst, midi_paths['bass'], wav_paths['bass'])
-    audio.gain_db_from_wav(wav_paths['bass'], 3)
+    audio.gain_db_from_wav(wav_paths['bass'], 7)
     print("bass_trk generated")
     max_length = max(len(mel_audio), len(acc_audio), len(bass_audio))
     mel_audio = np.pad(mel_audio, (0, max_length - len(mel_audio)), 'constant')

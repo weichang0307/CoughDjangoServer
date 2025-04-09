@@ -161,6 +161,7 @@ def write_from_midi(midi_file, output_file, sf="drum"):
     elif process.stderr.strip():
         print(f"Warning: FluidSynth stderr: {process.stderr.strip()}")
     else:
+        audio.gain_db_from_wav(output_file, 10)
         print(f"WAV file successfully generated: {output_file}")
 
 
