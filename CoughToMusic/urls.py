@@ -25,6 +25,9 @@ urlpatterns = [
     path('delete_music/', views.delete_music, name='delete_music'),
     path('rename_music/', views.rename_music, name='rename_music'),
     path('generate_trio/', views.generate_trio_from_cough, name='generate_trio'),
+    path('generate_drum/', views.generate_drum_from_cough, name='generate_drum'),
     path('get_music_cocreate/', views.get_music_cocreate, name='get_music_cocreate'),
     path('save_music_cocreate/', views.save_music_cocreate, name='save_music_cocreate'),
+    path('generate_enqueue/', views.unified_generate_view, name='unified_generate_view'),
+    path('generate_status_view/', views.generate_status_view, name='generate_status_view'),
 ]

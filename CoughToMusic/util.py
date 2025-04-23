@@ -86,7 +86,7 @@ def save_music_move(user_id, filename, filename_display):
             new_file_path = os.path.join(new_music_folder, f"{filename_display}.wav")  # 直接命名成 filename_display
             if file.endswith(".wav"):
                 shutil.move(old_file_path, new_file_path)
-        shutil.rmtree(old_music_folder)  # 移動完畢後刪除空資料夾
+        #shutil.rmtree(old_music_folder)  # 移動完畢後刪除空資料夾
     else:
         print(f"Error: {old_music_folder} does not exist.")
 
@@ -105,7 +105,7 @@ def save_music_move(user_id, filename, filename_display):
             new_file_path = os.path.join(new_midi_folder, f"{filename_display}_{substr[-1]}")
             if file.endswith(".mid"):
                 shutil.move(old_file_path, new_file_path)
-        shutil.rmtree(old_midi_folder)  # 移動完畢後刪除空資料夾
+        #shutil.rmtree(old_midi_folder)  # 移動完畢後刪除空資料夾
     else:
         print(f"Error: {old_midi_folder} does not exist.")
 

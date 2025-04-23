@@ -3,6 +3,7 @@ from midi_ddsp.midi_ddsp_synthesize import load_pretrained_model
 from midi_ddsp.data_handling.instrument_name_utils import INST_NAME_TO_ID_DICT
 from midi_ddsp.utils.audio_io import save_wav
 import audio
+import tensorflow as tf
 import numpy as np
 
 def get_instrument_settings(track, inst):
@@ -24,38 +25,26 @@ def get_instrument_settings(track, inst):
 
 def synthesize(track, inst, midi_path, output_path):
 
-    instrument, Db, Room_size, Damping, Wet_level = get_instrument_settings(track, inst)
-    instrument_id = INST_NAME_TO_ID_DICT[instrument]
+    with tf.device('/device:GPU:0'):
 
-    synthesis_generator, expression_generator = load_pretrained_model()
+        instrument, Db, Room_size, Damping, Wet_level = get_instrument_settings(track, inst)
+        instrument_id = INST_NAME_TO_ID_DICT[instrument]
 
-    midi_audio, midi_control_params, midi_synth_params, conditioning_df = synthesize_mono_midi(
-        synthesis_generator, expression_generator, midi_path, instrument_id, output_dir=None
-    )
+        synthesis_generator, expression_generator = load_pretrained_model()
 
-    synthesized_audio = midi_audio[0].numpy()
+        midi_audio, midi_control_params, midi_synth_params, conditioning_df = synthesize_mono_midi(
+            synthesis_generator, expression_generator, midi_path, instrument_id, output_dir=None
+        )
+
+        synthesized_audio = midi_audio[0].numpy()
     # board = Pedalboard([
     #     Gain(gain_db=Db),
     #     Reverb(room_size=Room_size, damping=Damping, wet_level=Wet_level),
     # ])
     # processed_audio = board(synthesized_audio, sample_rate)
-    save_wav(synthesized_audio, output_path)
-    return synthesized_audio
+        save_wav(synthesized_audio, output_path)
+        return synthesized_audio
 
-# def generate_trio(inst, track_id, folder='tracks'):
-#     mel = synthesize('mel', track_id, inst)
-#     acc = synthesize('acc', track_id, inst)
-#     bass = synthesize('bass', track_id, inst)
-#     output_path = str(Path(folder) / f"trio_wav" / f"trio_{track_id}.wav")
-#     # Ensure all tracks have the same length
-#     max_length = max(len(mel), len(acc), len(bass))
-#     mel = np.pad(mel, (0, max_length - len(mel)), 'constant')
-#     acc = np.pad(acc, (0, max_length - len(acc)), 'constant')
-#     bass = np.pad(bass, (0, max_length - len(bass)), 'constant')
-#     # Merge the tracks
-#     merged_audio = mel + acc + bass
-#     # Save the merged audio to a WAV file
-#     save_wav(merged_audio, output_path, sample_rate=16000)
 
 def generate_trio(inst, midi_paths: dict, wav_paths: dict, merged_output_path, sample_rate):
     
@@ -81,6 +70,20 @@ def generate_trio(inst, midi_paths: dict, wav_paths: dict, merged_output_path, s
     save_wav(merged_audio, merged_output_path, sample_rate)        
 
 
+# def generate_trio(inst, track_id, folder='tracks'):
+#     mel = synthesize('mel', track_id, inst)
+#     acc = synthesize('acc', track_id, inst)
+#     bass = synthesize('bass', track_id, inst)
+#     output_path = str(Path(folder) / f"trio_wav" / f"trio_{track_id}.wav")
+#     # Ensure all tracks have the same length
+#     max_length = max(len(mel), len(acc), len(bass))
+#     mel = np.pad(mel, (0, max_length - len(mel)), 'constant')
+#     acc = np.pad(acc, (0, max_length - len(acc)), 'constant')
+#     bass = np.pad(bass, (0, max_length - len(bass)), 'constant')
+#     # Merge the tracks
+#     merged_audio = mel + acc + bass
+#     # Save the merged audio to a WAV file
+#     save_wav(merged_audio, output_path, sample_rate=16000)
 
 # def generate_trio(inst, midi_paths: dict, wav_paths: dict):
 #     print(f"mel  path: {wav_paths['mel']}")

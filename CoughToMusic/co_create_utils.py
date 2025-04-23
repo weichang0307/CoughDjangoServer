@@ -164,20 +164,13 @@ def gen_trio_trk(id, inst, user_folder,uuid, sample_rate=16000):
     merged_output_path = os.path.join(user_folder,  f'{uuid}_trio.wav')
     # merged_output_path = os.path.join(user_folder, f'cocreate_{id}_trio.wav')
     generate_trio(inst, midi_paths, wav_paths, merged_output_path, sample_rate)
-    
     return merged_output_path
-
-# ID = 45
-# cough2midi(ID)
-# gen_trio_mid(ID)
-# gen_trio_trk(ID, 'string')
 
 def generate_groove_intp(folder_path, target_id, user_folder, uuid):
     drum_mid = id_to_pth(target_id, 'drum', 'mid') 
     # drum_trk = os.path.join(user_folder, f'cocreate_{uuid}_drum.wav')
     drum_trk = os.path.join(user_folder, f'{uuid}_drum.wav')
     drum_motif_trk =os.path.join(user_folder, f'{uuid}_drummotif.wav')
-
 
     df = classify_coughs(normalize_and_rank(process_all_coughs(folder_path)))
     cough7 = select_related_drums(df, target_id, 7)
@@ -201,7 +194,7 @@ def generate_groove_intp(folder_path, target_id, user_folder, uuid):
     midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
     midi.snap_on_grid_noteseq(tmp_sec, tmp_sec, 32)
     midi.snap_on_grid_noteseq(tmp_third, tmp_third, 16)
-    midi.snap_on_grid_noteseq(tmp_last, tmp_last, 32)
+    midi.snap_on_grid_noteseq(tmp_last, tmp_last, 16)
     midi.concatenate([tmp_sec, tmp_third], tmp_third, sec = 4.0)
     midi.concatenate([tmp_last, tmp_last], tmp_last2, sec = 4.0)
 
@@ -214,11 +207,10 @@ def generate_groove_intp(folder_path, target_id, user_folder, uuid):
     print(f"Drum motif generation to {drum_mid} completed.")
     return drum_motif_trk, drum_trk
 
+
 # generate_groove_intp(settings.PUBLIC_COUGH, ID)
 
 # def cough_to_drum_trk(id):
-    
-#     drum_mtf = id_to_pth(id, 'drum', 'mtf')
 #     drum_mid = id_to_pth(id, 'drum', 'mid')
 #     drum_trk = id_to_pth(id, 'drum', 'wav')
     
@@ -311,6 +303,34 @@ def save_final_cocreate(user_id, uuid, filename_display):
     update_music_table(user_id, music_table_data)
     print(f"✅ Successfully moved music & midi files for {filename_display}")
 
+
+def cough2midi_test(id, inst, sample_rate=16000):
+    COUGH_PATH = os.path.join(settings.PUBLIC_COUGH, f'{id}.wav')
+    mel_mtf = id_to_pth(id, 'mel', 'mtf')
+    acc_mtf = id_to_pth(id, 'acc', 'mtf')
+    bass_mtf = id_to_pth(id, 'bass', 'mtf')
+
+    cough2mid.cough2midi(COUGH_PATH, mel_mtf, **MEL_CONFIG)
+    cough2mid.correct_key(mel_mtf,mel_mtf)
+    cough2mid.cough2midi(COUGH_PATH, acc_mtf, **ACC_CONFIG)
+    cough2mid.correct_key(acc_mtf,acc_mtf)
+    cough2mid.cough2midi(COUGH_PATH, bass_mtf, **BASS_CONFIG)
+    cough2mid.correct_key(bass_mtf,bass_mtf)
+
+    midi_paths = {
+        'mel': mel_mtf,
+        'acc': acc_mtf,
+        'bass': bass_mtf
+    }
+    wav_paths = {
+        'mel': id_to_pth(id, 'mel', 'mtf_wav'),
+        'acc': id_to_pth(id, 'acc', 'mtf_wav'),
+        'bass': id_to_pth(id, 'bass', 'mtf_wav')
+    }
+    print("Cough to mid Execution")
+
+# ID =25
+# cough2midi_test(ID, 'string', sample_rate=16000)
 # cough_to_drum_trk(15)
 
 # import soundfile as sf
