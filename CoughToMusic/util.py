@@ -19,7 +19,7 @@ def save_pcm16_to_wav(filename, data, rate):
 def generate_music(user_id, cough_path, filename, bass_music = "tuba", alto_music = "clarinet", high_music = "flute", sample_rate = 16000):
    
     user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
-    
+    # temp改成和cocreate一樣的temp資料夾
     music_output_path_temp = os.path.join(user_folder, 'temp_music') 
     music_midi_path_temp = os.path.join(user_folder, 'temp_midi')
     
@@ -55,7 +55,7 @@ def generate_music(user_id, cough_path, filename, bass_music = "tuba", alto_musi
     return generated_music_path
 
 
-def save_music_move(user_id, filename, filename_display):
+def save_music_move(user_id, filename, filename_display, type):
     """
     修正後的 save_music_move 確保最內層的檔案名稱是 filename 而不是 uuid。
     """
@@ -73,22 +73,47 @@ def save_music_move(user_id, filename, filename_display):
     user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
 
     ### 處理 generated_music 資料夾 ###
-    music_folder = os.path.join(user_folder, 'generated_music')
-    os.makedirs(music_folder, exist_ok=True)
+    
 
-    old_music_folder = os.path.join(user_folder, 'temp_music', filename)
-    new_music_folder = os.path.join(music_folder, filename_display)
-    os.makedirs(new_music_folder, exist_ok=True)
-
-    if os.path.exists(old_music_folder):
-        for file in os.listdir(old_music_folder):
-            old_file_path = os.path.join(old_music_folder, file)
-            new_file_path = os.path.join(new_music_folder, f"{filename_display}.wav")  # 直接命名成 filename_display
-            if file.endswith(".wav"):
-                shutil.move(old_file_path, new_file_path)
-        #shutil.rmtree(old_music_folder)  # 移動完畢後刪除空資料夾
+    if type == 'trio':
+        #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
+        trio_new_fp = os.path.join(user_folder, 'generated_trio')
+        os.makedirs(trio_new_fp, exist_ok=True)
+        old_music_folder = os.path.join(user_folder, 'temp_trio', filename)
+        new_music_folder = os.path.join(trio_new_fp, filename_display)
+        os.makedirs(new_music_folder, exist_ok=True)
+        #togo
+    elif type == 'drum':
+        drum_new_fp = os.path.join(user_folder, 'generated_drum')
+        #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
+        os.makedirs(drum_new_fp, exist_ok=True)
+        old_music_folder = os.path.join(user_folder, 'temp_drum', filename)
+        new_music_folder = os.path.join(drum_new_fp, filename_display)
+        os.makedirs(new_music_folder, exist_ok=True)
+        #togo
     else:
-        print(f"Error: {old_music_folder} does not exist.")
+        #music_folder = os.path.join(user_folder, 'generated_music')
+        music_folder = os.path.join(user_folder, 'generated_music')
+        os.makedirs(music_folder, exist_ok=True)
+        old_music_folder = os.path.join(user_folder, 'temp_music', filename)
+        new_music_folder = os.path.join(music_folder, filename_display)
+        os.makedirs(new_music_folder, exist_ok=True)
+
+        if os.path.exists(old_music_folder):
+            for file in os.listdir(old_music_folder):
+                old_file_path = os.path.join(old_music_folder, file)
+                new_file_path = os.path.join(new_music_folder, f"{filename_display}.wav")  # 直接命名成 filename_display
+                if file.endswith(".wav"):
+                    shutil.move(old_file_path, new_file_path)
+            #shutil.rmtree(old_music_folder)  # 移動完畢後刪除空資料夾
+        else:
+            print(f"Error: {old_music_folder} does not exist.")
+        
+    
+    
+    
+
+    
 
     ### 處理 generated_midi 資料夾 ###
     midi_folder = os.path.join(user_folder, 'generated_midi')

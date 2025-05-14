@@ -1,8 +1,8 @@
 import os
 from django.views.decorators.csrf import csrf_exempt
-from .util import generate_music, save_pcm16_to_wav, init_user_folder, save_music_move
+from .util import save_pcm16_to_wav, init_user_folder, save_music_move
 from .table import update_user_table, init_user_table, init_cough_table, update_cough_table, init_music_table, update_music_table
-from .co_create_utils import gen_trio_mid, cough2midi, gen_trio_trk, generate_groove_intp, save_final_cocreate
+from .co_create_utils import save_final_cocreate
 from .task import GenerateJob, task_progress
 from django.conf import settings
 from django.http import JsonResponse
@@ -11,24 +11,44 @@ import shutil
 import pandas as pd
 import json
 import datetime
-
-
 from threading import Thread
 from queue import Queue
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pyloudnorm")
+import wave
 
 USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicProficiency', 'isCoughPublish', 'userEmail']
 COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time']
 MUSIC_TABLE_COLUMNS = ['filename', 'timestamp', 'time']
 
 generate_task_queue = Queue()
+processing_jobs = []  # 存放處理中的工作
+completed_jobs = []   # 存放完成的工作
 
 def generate_worker():
     while True:
         job = generate_task_queue.get()
+        print(f"[Worker] Running job {job.uuid} ({job.mode})")
+
+        # 將工作加入處理中的列表
+        processing_jobs.append(job)
         job.run()
+
+        # 從處理中的列表移除，並加入完成的列表
+        processing_jobs.remove(job)
+        completed_jobs.append(job)
+        print(f"[Worker] Finished job {job.uuid}")
         generate_task_queue.task_done()
 
 Thread(target=generate_worker, daemon=True).start()
+
+# ✅ Queue monitor: print queue length every 2 seconds
+# def monitor_queue(queue):
+#     while True:
+#         print(f"[Queue Monitor] Current queue size: {queue.qsize()}")
+#         time.sleep(2)
+
+# Thread(target=monitor_queue, args=(generate_task_queue,), daemon=True).start()
 
 
 @csrf_exempt
@@ -36,15 +56,18 @@ def create_cough_audio(request):
     if request.method == 'POST':
         try:
             sample_rate = 16000
-            # 獲取 JSON 數據（存放於普通表單字段中）
             metadata = request.POST.get('metadata')
             
-            # 將 metadata 轉換為字典並提取 userid 和 filename
             metadata_dict = json.loads(metadata)
             userid = metadata_dict.get('userId')
+            
             filename = metadata_dict.get('fileName')
+
             time = filename
             filename = os.path.join('', filename + '.wav')
+
+            if not isinstance(filename, str):
+                raise ValueError("Invalid filename format")
             
             # 獲取上傳的音檔
             audio_file = request.FILES.get('file')  # 獲取名為 'file' 的文件
@@ -108,17 +131,26 @@ def get_coughs(request):
             for filename in os.listdir(upload_folder):
                 if filename.endswith('.wav'):  # 只處理 WAV 檔案
                     file_path = os.path.join(upload_folder, filename)
-                    print("relative_path: ", file_path)
-                    timestamp = os.path.getmtime(file_path)  # 檔案修改時間
-                    duration = "00:00"  # 可替換成實際計算的音訊時長邏輯
+                    # print("relative_path: ", file_path)
+
+                    timestamp = os.path.getmtime(file_path)
+                    formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    with wave.open(file_path, 'r') as wav_file:
+                        frames = wav_file.getnframes()
+                        rate = wav_file.getframerate()
+                        duration_seconds = frames / float(rate)
+                        minutes, seconds = divmod(round(duration_seconds), 60)
+                        duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
                     
                     # 建立音訊紀錄字典
                     audio_record = {
                         "filename": filename.replace('.wav', ''),
                         "filePath": file_path,
-                        "timestamp": int(timestamp),
+                        "timestamp": formatted_timestamp,
                         "duration": duration
                     }
+                    print("audio_record: ", audio_record)
                     audio_records.append(audio_record)
 
             return JsonResponse(audio_records, safe=False, status=200)
@@ -145,26 +177,94 @@ def get_music(request):
             audio_records = []
             metadata_dict = json.loads(request.body)
             userid = metadata_dict.get('userId')
-            upload_folder = os.path.join(settings.MEDIA_ROOT, userid, 'generated_music')
+            upload_folder_normal = os.path.join(settings.MEDIA_ROOT, userid, 'generated_music')
+            upload_folder_trio = os.path.join(settings.MEDIA_ROOT, userid, 'generated_trio')
+            upload_folder_drum = os.path.join(settings.MEDIA_ROOT, userid, 'generated_drum')
+            os.makedirs(upload_folder_normal, exist_ok=True)
+            os.makedirs(upload_folder_trio, exist_ok=True)
+            os.makedirs(upload_folder_drum, exist_ok=True)
             
             # 使用 os.walk() 遞迴遍歷資料夾
-            for root, dirs, files in os.walk(upload_folder):
+            for root, dirs, files in os.walk(upload_folder_normal):
                 for filename in files:
                     if filename.endswith('.wav'):  # 只處理 WAV 檔案
                         file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
                         print("relative_path: ", file_path)
-                        timestamp = os.path.getmtime(file_path)  # 檔案修改時間
-                        duration = "00:00"  # 可替換成實際計算的音訊時長邏輯
+
+                        timestamp = os.path.getmtime(file_path)
+                        formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    
+                        with wave.open(file_path, 'r') as wav_file:
+                            frames = wav_file.getnframes()
+                            rate = wav_file.getframerate()
+                            duration_seconds = frames / float(rate)
+                            minutes, seconds = divmod(round(duration_seconds), 60)
+                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
                         
                         # 建立音訊紀錄字典
                         audio_record = {
                             "filename": filename.replace('.wav', ''),
                             "filePath": file_path,
-                            "timestamp": int(timestamp),
-                            "duration": duration
+                            "timestamp": formatted_timestamp,
+                            "duration": duration,
+                            "type": "normal"
                         }
                         audio_records.append(audio_record)
 
+             # 使用 os.walk() 遞迴遍歷資料夾
+            for root, dirs, files in os.walk(upload_folder_trio):
+                for filename in files:
+                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
+                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
+                        print("relative_path: ", file_path)
+
+                        timestamp = os.path.getmtime(file_path)
+                        formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    
+                        with wave.open(file_path, 'r') as wav_file:
+                            frames = wav_file.getnframes()
+                            rate = wav_file.getframerate()
+                            duration_seconds = frames / float(rate)
+                            minutes, seconds = divmod(round(duration_seconds), 60)
+                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
+                        
+                        # 建立音訊紀錄字典
+                        audio_record = {
+                            "filename": filename.replace('.wav', ''),
+                            "filePath": file_path,
+                            "timestamp": formatted_timestamp,
+                            "duration": duration,
+                            "type": "trio"
+                        }
+                        audio_records.append(audio_record)
+
+            for root, dirs, files in os.walk(upload_folder_drum):
+                for filename in files:
+                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
+                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
+                        print("relative_path: ", file_path)
+
+                        timestamp = os.path.getmtime(file_path)
+                        formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    
+                        with wave.open(file_path, 'r') as wav_file:
+                            frames = wav_file.getnframes()
+                            rate = wav_file.getframerate()
+                            duration_seconds = frames / float(rate)
+                            minutes, seconds = divmod(round(duration_seconds), 60)
+                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
+                        
+                        # 建立音訊紀錄字典
+                        audio_record = {
+                            "filename": filename.replace('.wav', ''),
+                            "filePath": file_path,
+                            "timestamp": formatted_timestamp,
+                            "duration": duration,
+                            "type": "drum"
+                        }
+                        audio_records.append(audio_record)
+
+            print("audio_records: ", audio_records)
             return JsonResponse(audio_records, safe=False, status=200)
 
         except Exception as e:
@@ -213,7 +313,8 @@ def save_music(request):
             userid = metadata_dict.get('userId')
             uuid = metadata_dict.get('uuid')
             fileName = metadata_dict.get('fileName')
-            save_music_move(userid, uuid, fileName)
+            type = metadata_dict.get('type')
+            save_music_move(userid, uuid, fileName, type)
             return JsonResponse({'message': 'Save music successfully.'}, status=200)
             
         except Exception as e:
@@ -442,6 +543,7 @@ def get_cough_statistics(request):
             start_date = pd.to_datetime(start_date)
             end_date = pd.to_datetime(end_date)
             
+
             # 過濾出在 start_date 和 end_date 之間的時間
             filtered_df = cough_df[(cough_df['timestamp'] >= start_date) & (cough_df['timestamp'] <= end_date)]
             time_list = filtered_df['time'].tolist()
@@ -584,8 +686,6 @@ def start_record(request):
             df.loc[0, 'isCoughPublish'] = isCoughPub
             df.to_csv(user_table_path, index=False)
 
-
-
             # 假設音頻數據為 float32 格式的原始數據流
             return JsonResponse({'message': 'start audio.'}, status=200)
         except Exception as e:
@@ -712,157 +812,7 @@ def rename_music(request):
 
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
-@csrf_exempt
-def generate(request):
-    if request.method == 'POST':
-            # Debug: Log the raw request body
-
-            # Parse JSON from the request body
-            data = json.loads(request.body.decode("utf-8"))
-
-            # Validate required keys
-            required_keys = ['cough_path', 'user_id', 'bass', 'alto', 'high', 'uuid']
-            missing_keys = [key for key in required_keys if key not in data]
-            if missing_keys:
-                return JsonResponse({'error': f'Missing required keys: {missing_keys}'}, status=400)
-
-            # Process data
-            generate_path = generate_music(
-                data['user_id'],
-                data['cough_path'],
-                data['uuid'],
-                data['bass'].lower(),
-                data['alto'].lower(),
-                data['high'].lower()
-            )
-            
-            # Success response
-            return JsonResponse({'generate_path': generate_path, 'cough_path': data['cough_path']}, status=200)
-
-        
-@csrf_exempt
-def generate_trio_from_cough(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body.decode("utf-8"))
-            print("data: ", data)
-            user_id = data['userId']
-            cough_path = data['coughPath']
-            uuid = data['uuid']
-            time_value = os.path.splitext(os.path.basename(cough_path))[0]
-            print(time_value)  # Output: 2025-04-07-16-30-10
-
-            user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_cocreate')
-            os.makedirs(user_tmp_folder, exist_ok=True)
-
-            # time_value = data.get('time')
-            instrument_type = 'string'
-
-            cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
-            if not os.path.exists(cough_table_path):
-                return JsonResponse({'error': f'Cough table not found for user {user_id}.'}, status=404)
-
-            df = pd.read_csv(cough_table_path)
-            match = df[df['time'] == time_value]
-            if match.empty:
-                return JsonResponse({'error': f'No entry found for time {time_value}.'}, status=404)
-
-            pubCoughID = int(match.iloc[0]['pubCoughID'])
-            print ("pubCoughID: ", pubCoughID)
-
-            generate_path_triomotif = cough2midi(pubCoughID, instrument_type, user_tmp_folder, uuid, sample_rate=16000)
-            gen_trio_mid(pubCoughID)
-            generate_path_trio = gen_trio_trk(pubCoughID, instrument_type,user_tmp_folder,uuid,  sample_rate=16000)
-            # generate_path_drummotif, generate_path_drum = generate_groove_intp(settings.PUBLIC_COUGH, pubCoughID, user_tmp_folder, uuid)
-
-            print("generate_path_trio: ", generate_path_trio)
-            return JsonResponse({
-                'cough_path' : data['coughPath'],
-                'generate_path_triomotif': generate_path_triomotif,
-                'generate_path_trio': generate_path_trio, 
-            }, status=200)
-
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            return JsonResponse({'error': str(e)}, status=500)
-    return JsonResponse({'error': 'Invalid request method'}, status=400)
-
-@csrf_exempt
-def generate_drum_from_cough(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body.decode("utf-8"))
-            print("data: ", data)
-            user_id = data['userId']
-            cough_path = data['coughPath']
-            uuid = data['uuid']
-            time_value = os.path.splitext(os.path.basename(cough_path))[0]
-            print(time_value)  # Output: 2025-04-07-16-30-10
-
-            user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_cocreate')
-            os.makedirs(user_tmp_folder, exist_ok=True)
-
-            # time_value = data.get('time')
-
-            cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
-            if not os.path.exists(cough_table_path):
-                return JsonResponse({'error': f'Cough table not found for user {user_id}.'}, status=404)
-
-            df = pd.read_csv(cough_table_path)
-            match = df[df['time'] == time_value]
-            if match.empty:
-                return JsonResponse({'error': f'No entry found for time {time_value}.'}, status=404)
-
-            pubCoughID = int(match.iloc[0]['pubCoughID'])
-            print ("pubCoughID: ", pubCoughID)
-            # generate_path_triomotif = cough2midi(pubCoughID, instrument_type, user_tmp_folder, uuid, sample_rate=16000)
-            # gen_trio_mid(pubCoughID)
-            # generate_path_trio = gen_trio_trk(pubCoughID, instrument_type,user_tmp_folder,uuid,  sample_rate=16000)
-            generate_path_drummotif, generate_path_drum = generate_groove_intp(settings.PUBLIC_COUGH, pubCoughID, user_tmp_folder, uuid)   
-            return JsonResponse({
-                'cough_path' : data['coughPath'],
-                'generate_path_drummotif': generate_path_drummotif,
-                'generate_path_drum': generate_path_drum, 
-            }, status=200)
-
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            return JsonResponse({'error': str(e)}, status=500)
-    return JsonResponse({'error': 'Invalid request method'}, status=400)
-
-@csrf_exempt
-def get_music_cocreate(request):
-    if request.method == 'POST':
-        try:
-            # 準備回傳的音訊資料
-            audio_records = []
-            metadata_dict = json.loads(request.body)
-            userid = metadata_dict.get('userId')
-            upload_folder = os.path.join(settings.MEDIA_ROOT, userid, 'generated_music_cocreate')
-            
-            # 使用 os.walk() 遞迴遍歷資料夾
-            for root, dirs, files in os.walk(upload_folder):
-                for filename in files:
-                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
-                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
-                        print("relative_path: ", file_path)
-                        timestamp = os.path.getmtime(file_path)  # 檔案修改時間
-                        duration = "00:00"  # 可替換成實際計算的音訊時長邏輯
-                        
-                        # 建立音訊紀錄字典
-                        audio_record = {
-                            "filename": filename.replace('.wav', ''),
-                            "filePath": file_path,
-                            "timestamp": int(timestamp),
-                            "duration": duration
-                        }
-                        audio_records.append(audio_record)
-
-            return JsonResponse(audio_records, safe=False, status=200)
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=500)
-
-               
+              
 @csrf_exempt 
 def save_music_cocreate(request):
     if request.method == 'POST':
@@ -880,23 +830,21 @@ def save_music_cocreate(request):
         
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
-# Global task queue and progress tracking
-
-
 
 @csrf_exempt
-def unified_generate_view(request):
+def generate(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid request method'}, status=400)
     try:
         data = json.loads(request.body.decode("utf-8"))
-        mode = data.get('mode')
+        mode = data.get('mode', 'normal')
         uuid = data.get('uuid')
         if not mode or not uuid:
             return JsonResponse({'error': 'Missing mode or uuid'}, status=400)
 
-        generate_task_queue.put(GenerateJob(mode, data, uuid))
-        task_progress[uuid] = 'queued'
+        job = GenerateJob(mode, data, uuid)
+        generate_task_queue.put(job)  # 將 job 放入 queue
+        task_progress[uuid] = job  # 將 job 存入 task_progress
         return JsonResponse({'status': 'queued', 'uuid': uuid}, status=202)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
@@ -904,7 +852,61 @@ def unified_generate_view(request):
 @csrf_exempt
 def generate_status_view(request):
     uuid = request.GET.get('uuid')
-    if not uuid:
-        return JsonResponse({'error': 'Missing uuid'}, status=400)
-    status = task_progress.get(uuid, 'not_found')
-    return JsonResponse({'status': status})
+    
+    # 如果有指定 uuid，返回該 uuid 的狀態
+    if uuid:
+        job = task_progress.get(uuid, None)
+        if job:
+            return JsonResponse({
+                'uuid': job.uuid,
+                'mode': job.mode,
+                'time': job.time,
+                'duration': job.duration,
+                'status': job.status,
+                'result': job.result if job.status == 'completed' else None
+            }, status=200)
+        return JsonResponse({'error': 'UUID not found'}, status=404)
+
+    # 如果沒有指定 uuid，返回所有 queue、processing 和 completed 的物件
+    queued_jobs = [
+        {
+            'uuid': job.uuid,
+            'mode': job.mode,
+            'time': job.time,
+            'duration': job.duration,
+            'status': 'queued',
+            'cough_path':job.data['cough_path'],
+            'result': job.result
+        }
+        for job in generate_task_queue.queue
+    ]
+
+    processing_jobs_status = [
+        {
+            'uuid': job.uuid,
+            'mode': job.mode,
+            'time': job.time,
+            'duration': job.duration,
+            'status': 'processing',
+            'result': job.result
+        }
+        for job in processing_jobs
+    ]
+
+    completed_jobs_status = [
+        {
+            'uuid': job.uuid,
+            'mode': job.mode,
+            'time': job.time,
+            'duration': job.duration,
+            'status': 'completed',
+            'result': job.result
+        }
+        for job in completed_jobs
+    ]
+
+
+    all_jobs = queued_jobs + processing_jobs_status + completed_jobs_status
+    return JsonResponse({
+        'queue': all_jobs
+    }, status=200)

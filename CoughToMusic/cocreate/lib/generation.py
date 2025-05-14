@@ -101,16 +101,46 @@ def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_
 
 import random
 
-def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
-    if len(note_seq.notes) >= min_notes:
-        return note_seq
+# def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
+#     if len(note_seq.notes) >= min_notes:
+#         return note_seq
     
-    min_pitch =min(n.pitch for n in note_seq.notes)
-    max_pitch =max(n.pitch for n in note_seq.notes)
+#     min_pitch =min(n.pitch for n in note_seq.notes)
+#     max_pitch =max(n.pitch for n in note_seq.notes)
+#     pitch_range = (min_pitch, max_pitch) if min_pitch < max_pitch else (0, 127)
+#     # Collect existing note start times to avoid overlap
+#     existing_times = {(n.start_time, n.pitch) for n in note_seq.notes}
+    
+#     # Generate random non-overlapping notes
+#     while len(note_seq.notes) < min_notes:
+#         start = round(random.uniform(0, total_time - 0.1), 2)
+#         duration = 0.25
+#         pitch = random.randint(*pitch_range)
+#         if (start, pitch) in existing_times:
+#             continue
+#         note = note_seq.notes.add()
+#         note.start_time = start
+#         note.end_time = start + duration
+#         note.pitch = pitch
+#         note.velocity = 80
+#         note.instrument = 0
+#         note.program = 0
+#         existing_times.add((start, pitch))
+
+#     note_seq.total_time = max(note.end_time for note in note_seq.notes)
+#     print(f'modify to {len(note_seq.notes)}' )
+#     return note_seq
+
+def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
+    if len(note_seq.notes) >= min_notes and note_seq.total_time >= total_time:
+        return note_seq
+
+    min_pitch = min(n.pitch for n in note_seq.notes)
+    max_pitch = max(n.pitch for n in note_seq.notes)
     pitch_range = (min_pitch, max_pitch) if min_pitch < max_pitch else (0, 127)
     # Collect existing note start times to avoid overlap
     existing_times = {(n.start_time, n.pitch) for n in note_seq.notes}
-    
+
     # Generate random non-overlapping notes
     while len(note_seq.notes) < min_notes:
         start = round(random.uniform(0, total_time - 0.1), 2)
@@ -127,8 +157,19 @@ def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
         note.program = 0
         existing_times.add((start, pitch))
 
+    # Check if total time is less than 4.0 and add a note from 3.875 to 4.0
+    if note_seq.total_time < total_time:
+        last_note_pitch = note_seq.notes[-1].pitch if note_seq.notes else 60  # Default to pitch 60 if no notes
+        note = note_seq.notes.add()
+        note.start_time = 3.875
+        note.end_time = 4.0
+        note.pitch = last_note_pitch
+        note.velocity = 80
+        note.instrument = 0
+        note.program = 0
+
     note_seq.total_time = max(note.end_time for note in note_seq.notes)
-    print(f'modify to {len(note_seq.notes)}' )
+    print(f'modify to {len(note_seq.notes)} notes, total time: {note_seq.total_time}')
     return note_seq
 
 """MELODY GENERATION , MELODY INTERPOLATIOAN FUNCTIONS"""
