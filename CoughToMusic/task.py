@@ -40,7 +40,7 @@ class GenerateJob:
                     self.data['high'].lower()
                 )
 
-                
+
                 self.result = {'generate_path': generate_path, 'cough_path': self.data['cough_path']}
 
             elif self.mode == 'trio':
@@ -65,7 +65,8 @@ class GenerateJob:
                 gen_trio_mid(pubCoughID)
                 generate_path_trio = gen_trio_trk(pubCoughID, 'string', user_tmp_folder, uuid, sample_rate=16000)
                 self.result = {
-                    'cough_path': cough_path,
+                    # cough path publicID要更新 沒有更新到
+                    'cough_path': self.data['cough_path'],
                     'generate_path_triomotif': generate_path_triomotif,
                     'generate_path_trio': generate_path_trio
                 }
@@ -87,7 +88,7 @@ class GenerateJob:
                 generate_path_drummotif, generate_path_drum = generate_groove_intp(
                     settings.PUBLIC_COUGH, pubCoughID, user_tmp_folder, uuid)
                 self.result = {
-                    'cough_path': cough_path,
+                    'cough_path': self.data['cough_path'],
                     'generate_path_drummotif': generate_path_drummotif,
                     'generate_path_drum': generate_path_drum
                 }

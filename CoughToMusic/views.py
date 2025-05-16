@@ -21,9 +21,17 @@ USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicPr
 COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time']
 MUSIC_TABLE_COLUMNS = ['filename', 'timestamp', 'time']
 
+
+
 generate_task_queue = Queue()
 processing_jobs = []  # 存放處理中的工作
 completed_jobs = []   # 存放完成的工作
+
+def remove_job_by_uuid(completed_jobs, uuid_to_remove):
+    for job in completed_jobs:
+        if job.uuid == uuid_to_remove:
+            completed_jobs.remove(job)
+            break  # 找到並刪除後立即退出迴圈
 
 def generate_worker():
     while True:
@@ -56,24 +64,18 @@ def create_cough_audio(request):
     if request.method == 'POST':
         try:
             sample_rate = 16000
-            metadata = request.POST.get('metadata')
-            
+            metadata = request.POST.get('metadata')            
             metadata_dict = json.loads(metadata)
             userid = metadata_dict.get('userId')
-            
             filename = metadata_dict.get('fileName')
-
             time = filename
             filename = os.path.join('', filename + '.wav')
-
             if not isinstance(filename, str):
                 raise ValueError("Invalid filename format")
             
-            # 獲取上傳的音檔
             audio_file = request.FILES.get('file')  # 獲取名為 'file' 的文件
             audio_data = audio_file.read()
             
-            # 接收音頻數據 
             file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', filename)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             save_pcm16_to_wav(file_path, audio_data, sample_rate)
@@ -84,34 +86,24 @@ def create_cough_audio(request):
 
             df = pd.read_csv(user_table_path)
             isCoughPub = df.loc[0, 'isCoughPublish']
+            isCoughPub = True
 
             file_count = -1
 
             if isCoughPub:
-                # 定義存儲路徑
                 folder_path_public = os.path.join(settings.MEDIA_ROOT, 'public_cough')
-    
-                # 確保資料夾存在
-                os.makedirs(folder_path_public, exist_ok=True)
-    
-                # 取得資料夾內檔案數量
-                existing_files = os.listdir(folder_path_public)
+                # os.makedirs(folder_path_public, exist_ok=True)
+                print("folder_path_public: ", folder_path_public)
+                existing_files= os.listdir(folder_path_public)
                 file_count = len(existing_files)
-    
-                # 設定新檔案名稱
+                print("file_count: ", file_count)
                 filename = f"{file_count + 1}.wav"  # 你可以根據需要調整檔案名稱格式
-    
-                # 完整檔案路徑
+                
                 file_path_public = os.path.join(folder_path_public, filename)
-    
-                # 儲存檔案
                 save_pcm16_to_wav(file_path_public, audio_data, sample_rate)
-
-            # 更新 cough_table.csv
+        
             cough_table_data = {'filename': filename, 'timestamp': datetime.datetime.now().timestamp(), 'pubCoughID' : file_count+1, 'time' : time}
             update_cough_table(userid, cough_table_data)
-            
-            # 假設音頻數據為 float32 格式的原始數據流
             return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
         except Exception as e:
             print("Error: ", e)
@@ -210,7 +202,6 @@ def get_music(request):
                             "type": "normal"
                         }
                         audio_records.append(audio_record)
-
              # 使用 os.walk() 遞迴遍歷資料夾
             for root, dirs, files in os.walk(upload_folder_trio):
                 for filename in files:
@@ -312,9 +303,12 @@ def save_music(request):
             metadata_dict = json.loads(request.body)
             userid = metadata_dict.get('userId')
             uuid = metadata_dict.get('uuid')
+            print("uuid: ", uuid)
             fileName = metadata_dict.get('fileName')
             type = metadata_dict.get('type')
+            remove_job_by_uuid(completed_jobs, uuid)
             save_music_move(userid, uuid, fileName, type)
+            
             return JsonResponse({'message': 'Save music successfully.'}, status=200)
             
         except Exception as e:
