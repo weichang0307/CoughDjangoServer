@@ -49,11 +49,14 @@ def generate_midi_sequence(target_midi_file, folder_path):
     similarity_matrix = compute_similarity_matrix(selected_files)
 
     # Construct similarity graph
+    target_filename = os.path.basename(target_midi_file)
+    # Build graph ensuring user's target motif is included
     graph = construct_similarity_graph(nodes, similarity_matrix)
+
 
     # Get MIDI order based on the graph structure
     midi_order_filenames = get_midi_order(graph, os.path.basename(target_midi_file), similarity_matrix, nodes)
-
+    print("MIDI Order Filenames:", midi_order_filenames)
     # Convert filenames back to MIDI IDs
     midi_order = [int(f.replace("mel_", "").replace(".mid", "")) for f in midi_order_filenames]
 

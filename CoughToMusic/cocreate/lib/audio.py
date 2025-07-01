@@ -7,6 +7,7 @@ import noisereduce
 import pretty_midi
 from pydub import AudioSegment
 import soundfile as sf
+from pedalboard import Pedalboard, Gain, Reverb
 
 
 def load_from_dir(audio_path):
@@ -189,3 +190,15 @@ def padd_to_4_seconds(audio_file):
         silence = AudioSegment.silent(duration=4000 - duration)
         audio_segment = audio_segment + silence
         audio_segment.export(audio_file, format="wav")
+
+def save_audio(np_audio, output_path, sample_rate = 16000):
+    print("sample_rate:", sample_rate)
+    sf.write(output_path, np_audio, sample_rate)
+
+def sound_synthesis(Db, Room_size, Damping, Wet_level, synthesized_audio, sample_rate):
+    board = Pedalboard([
+        Gain(gain_db=Db),
+        Reverb(room_size=Room_size, damping=Damping, wet_level=Wet_level),
+    ])
+    processed_audio = board(synthesized_audio, sample_rate)
+    return processed_audio

@@ -62,7 +62,11 @@ def construct_similarity_graph(nodes, similarity_matrix):
         graph.add_node(node)
 
     # Create edges sorted by weight (highest similarity first)
-    edges = [(nodes[i], nodes[j], similarity_matrix[i][j]) for i in range(len(nodes)) for j in range(i + 1, len(nodes))]
+    edges = [
+        (nodes[i], nodes[j], similarity_matrix[i][j])
+        for i in range(len(nodes)) for j in range(i + 1, len(nodes))
+        if similarity_matrix[i][j] >= 0.75  # 只保留 weight >= 0.75 的 edge
+    ]
     edges = sorted(edges, key=lambda x: x[2], reverse=True)
 
     # Select edges ensuring each node has at most 2 connections
@@ -93,6 +97,7 @@ def get_midi_order(graph, target_mel, similarity_matrix, nodes):
 
     # CASE 1: If 4 nodes are connected, remove the weakest edge
     if len(largest_component) == 4:
+        print("=== CASE 1: 4 nodes connected ===")
         weakest_edge = min(edges, key=lambda x: x[2]['weight'])  # Find the lowest-weight edge
         graph.remove_edge(weakest_edge[0], weakest_edge[1])  # Remove it
 
@@ -105,38 +110,36 @@ def get_midi_order(graph, target_mel, similarity_matrix, nodes):
         cycle = nx.find_cycle(subgraph)
     except nx.exception.NetworkXNoCycle:
         cycle = None  # No cycle found
-
     if len(largest_component) == 3 and target_mel in largest_component:
-        # Find and sort cycle edges by weight
-        cycle_edges = sorted(cycle, key=lambda x: graph[x[0]][x[1]]['weight'], reverse=True)
-        # Print cycle edges for debugging
-        # print("\n=== Cycle Edges (Sorted by Weight) ===")
-        # for edge in cycle_edges:
-            # print(f"{edge[0]} -- ({graph[edge[0]][edge[1]]['weight']:.2f}) -- {edge[1]}")
+        print("=== CASE 2: 3 nodes connected ===")
+        if subgraph.number_of_edges() == 3:
+            try:
+                cycle = nx.find_cycle(subgraph)
+            except nx.NetworkXNoCycle:
+                cycle = None
+        else:
+            cycle = None
 
-        # Pick the two strongest edges
-        first_edge = cycle_edges[0]
-        second_edge = cycle_edges[1]
+        if cycle:
+            cycle_edges = sorted(cycle, key=lambda x: graph[x[0]][x[1]]['weight'], reverse=True)
+            ...
+        else:
+            print("No cycle, using path-based ordering.")
+            # fallback: get degree-1 endpoints and place the middle node accordingly
+            deg = subgraph.degree()
+            ends = [n for n, d in deg if d == 1]
+            if len(ends) == 2:
+                mid = list(set(largest_component) - set(ends))[0]
+                final_order = [ends[0], mid, ends[1]]
+                return final_order
+            else:
+                return list(largest_component)
 
-        # Print selected edges
-        # print("\n=== Selected Top 2 Strongest Edges ===")
-        # print(f"1st: {first_edge[0]} -- ({graph[first_edge[0]][first_edge[1]]['weight']:.2f}) -- {first_edge[1]}")
-        # print(f"2nd: {second_edge[0]} -- ({graph[second_edge[0]][second_edge[1]]['weight']:.2f}) -- {second_edge[1]}")
-
-        # Find the common node (should be the middle node)
-        middle_node = list(set(first_edge[:2]).intersection(set(second_edge[:2])))[0]
-        # Identify the other two nodes
-        remaining_nodes = list(set(first_edge[:2]).union(set(second_edge[:2])) - {middle_node})
-        # Assign order ensuring the middle node is correctly placed
-        final_order = [remaining_nodes[0], middle_node, remaining_nodes[1]]
-        # Debugging Output
-        # print("\n=== Final Order (Target in Middle) ===")
-        # print(final_order)
-        return final_order
 
     # CASE 3: If 3 nodes connected but target is outside the cycle
     elif len(largest_component) == 3 and target_mel not in largest_component:
         # Find the node with highest similarity to target_mel
+        print("=== CASE 3: 3 nodes connected but target outside cycle ===")
         target_idx = nodes.index(target_mel)
         similarities = similarity_matrix[target_idx]
 
@@ -144,6 +147,18 @@ def get_midi_order(graph, target_mel, similarity_matrix, nodes):
         most_similar_node = nodes[np.argsort(similarities)[-2]]  # Second highest (highest is itself)
 
         return [target_mel, most_similar_node]
+    final_nodes = list(largest_component)
+    if target_mel not in final_nodes or len(final_nodes) == 1:
+        print("=== CASE 4: Target not in largest component or only one node ===")
+        target_idx = nodes.index(target_mel)
+        similarities = similarity_matrix[target_idx].copy()
+        similarities[target_idx] = -1  # exclude self
 
+        # Get top 3 most similar nodes (excluding self)
+        candidate_indices = np.argsort(similarities)[::-1]
+        for idx in candidate_indices:
+            candidate = nodes[idx]
+            if candidate != target_mel:
+                return [target_mel, candidate]
     # Default case: return the largest connected component
     return list(largest_component)

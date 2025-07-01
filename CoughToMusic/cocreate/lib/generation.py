@@ -78,7 +78,8 @@ def concatenate_sequences(midi_path_start, midi_path_end, output_path):
     )
     final_seq = mm.sequences_lib.concatenate_sequences(all_seq, seq_durations)
     mm.sequence_proto_to_midi_file(final_seq, output_path)
-    
+
+
 def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_path, target_duration=4.0):
     interp_note_seq = [normalize_sequence_duration(seq, target_duration) for seq in interp_note_seq]
     # print(interp_note_seq)
@@ -99,7 +100,15 @@ def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_
     mm.sequence_proto_to_midi_file(final_seq, output_path)
     print(f"Interpolated MIDI file has been saved to: {output_path}")
 
-import random
+
+# def concatenate_midi(sequences, output_path, segment_duration=4.0):
+#     normalized_sequences = [normalize_to_zero(seq) for seq in sequences]
+#     durations = [segment_duration] * len(normalized_sequences)
+#     final_seq = mm.sequences_lib.concatenate_sequences(normalized_sequences, durations)
+#     mm.sequence_proto_to_midi_file(final_seq, output_path)
+#     print(f"Concatenated MIDI saved to {output_path}")
+#     return final_seq
+# import random
 
 # def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
 #     if len(note_seq.notes) >= min_notes:
@@ -131,23 +140,108 @@ import random
 #     print(f'modify to {len(note_seq.notes)}' )
 #     return note_seq
 
+# def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
+#     if len(note_seq.notes) >= min_notes and note_seq.total_time >= total_time:
+#         return note_seq
+
+#     min_pitch = min(n.pitch for n in note_seq.notes)
+#     max_pitch = max(n.pitch for n in note_seq.notes)
+#     pitch_range = (min_pitch, max_pitch) if min_pitch < max_pitch else (0, 127)
+#     # Collect existing note start times to avoid overlap
+#     existing_times = {(n.start_time, n.pitch) for n in note_seq.notes}
+
+#     # Generate random non-overlapping notes
+#     while len(note_seq.notes) < min_notes:
+#         start = round(random.uniform(0, total_time - 0.125), 2)
+#         duration = 0.125
+#         pitch = random.randint(*pitch_range)
+#         if (start, pitch) in existing_times:
+#             continue
+#         note = note_seq.notes.add()
+#         note.start_time = start
+#         note.end_time = start + duration
+#         note.pitch = pitch
+#         note.velocity = 80
+#         note.instrument = 0
+#         note.program = 0
+#         existing_times.add((start, pitch))
+
+    # # Check if total time is less than 4.0 and add a note from 3.875 to 4.0
+    # if note_seq.total_time < total_time:
+    #     last_note_pitch = note_seq.notes[-1].pitch if note_seq.notes else 60  # Default to pitch 60 if no notes
+    #     note = note_seq.notes.add()
+    #     note.start_time = 3.875
+    #     note.end_time = 4.0
+    #     note.pitch = last_note_pitch
+    #     note.velocity = 80
+    #     note.instrument = 0
+    #     note.program = 0
+
+    # note_seq.total_time = max(note.end_time for note in note_seq.notes)
+    # print(f'modify to {len(note_seq.notes)} notes, total time: {note_seq.total_time}')
+    # return note_seq
 def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
+    import random
+
+    duration = 0.125
     if len(note_seq.notes) >= min_notes and note_seq.total_time >= total_time:
         return note_seq
 
-    min_pitch = min(n.pitch for n in note_seq.notes)
-    max_pitch = max(n.pitch for n in note_seq.notes)
-    pitch_range = (min_pitch, max_pitch) if min_pitch < max_pitch else (0, 127)
-    # Collect existing note start times to avoid overlap
-    existing_times = {(n.start_time, n.pitch) for n in note_seq.notes}
+    notes = sorted(note_seq.notes, key=lambda n: n.start_time)
+    intervals = []
+    prev_end = 0.0
+    prev_pitch = None
 
-    # Generate random non-overlapping notes
-    while len(note_seq.notes) < min_notes:
-        start = round(random.uniform(0, total_time - 0.1), 2)
-        duration = 0.25
-        pitch = random.randint(*pitch_range)
-        if (start, pitch) in existing_times:
+    for i, n in enumerate(notes):
+        start, end = n.start_time, n.end_time
+        if start - prev_end >= duration:
+            next_pitch = n.pitch
+            intervals.append({
+                "start": prev_end,
+                "end": start,
+                "length": start - prev_end,
+                "prev_pitch": prev_pitch,
+                "next_pitch": next_pitch
+            })
+        prev_end = max(prev_end, end)
+        prev_pitch = n.pitch
+
+    # Tail gap
+    if total_time - prev_end >= duration:
+        intervals.append({
+            "start": prev_end,
+            "end": total_time,
+            "length": total_time - prev_end,
+            "prev_pitch": prev_pitch,
+            "next_pitch": None
+        })
+
+    intervals.sort(key=lambda x: -x["length"])  # biggest gap first
+    existing = {(n.start_time, n.pitch) for n in note_seq.notes}
+
+    while len(note_seq.notes) < min_notes and intervals:
+        interval = intervals.pop(0)
+        legal_start = interval["start"]
+        legal_end = interval["end"]
+        max_start = legal_end - duration
+        if legal_start > max_start:
             continue
+
+        start = round(random.uniform(legal_start, max_start), 3)
+        pp, np = interval["prev_pitch"], interval["next_pitch"]
+        if pp is not None and np is not None:
+            low, high = sorted([pp, np])
+        elif pp is not None:
+            low, high = pp - 2, pp + 2
+        elif np is not None:
+            low, high = np - 2, np + 2
+        else:
+            low, high = 60, 72  # fallback pitch range
+
+        pitch = random.randint(max(0, low), min(127, high))
+        if (start, pitch) in existing:
+            continue
+
         note = note_seq.notes.add()
         note.start_time = start
         note.end_time = start + duration
@@ -155,8 +249,7 @@ def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
         note.velocity = 80
         note.instrument = 0
         note.program = 0
-        existing_times.add((start, pitch))
-
+        existing.add((start, pitch))
     # Check if total time is less than 4.0 and add a note from 3.875 to 4.0
     if note_seq.total_time < total_time:
         last_note_pitch = note_seq.notes[-1].pitch if note_seq.notes else 60  # Default to pitch 60 if no notes
@@ -171,6 +264,7 @@ def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
     note_seq.total_time = max(note.end_time for note in note_seq.notes)
     print(f'modify to {len(note_seq.notes)} notes, total time: {note_seq.total_time}')
     return note_seq
+
 
 """MELODY GENERATION , MELODY INTERPOLATIOAN FUNCTIONS"""
 
@@ -200,16 +294,19 @@ def interpolate_melody_tensors(
     model_path = str(Path("CoughToMusic/cocreate/model") / config_name / f"{config_name}.ckpt")
     data_converter = configs.CONFIG_MAP["cat-mel_2bar_big"].data_converter
     music_vae = TrainedModel(configs.CONFIG_MAP["cat-mel_2bar_big"], batch_size=4, checkpoint_dir_or_path=model_path)
+    try:
+        s_input_output = data_converter.to_tensors(start_note_seq)
+        # print("s_input_output:", s_input_output)
+        s_tensors = s_input_output[0] if s_input_output[0] else s_input_output[1]
+        start_tensors = data_converter.from_tensors(s_tensors)
 
-    s_input_output = data_converter.to_tensors(start_note_seq)
-    # print("s_input_output:", s_input_output)
-    s_tensors = s_input_output[0] if s_input_output[0] else s_input_output[1]
-    start_tensors = data_converter.from_tensors(s_tensors)
+        e_input_output = data_converter.to_tensors(end_note_seq)
+        # print("e_input_output:", e_input_output)
+        e_tensors = e_input_output[0] if e_input_output[0] else e_input_output[1]
+        end_tensors = data_converter.from_tensors(e_tensors)
+    except Exception as e:
+        print(f"Error converting to tensors: {e}")
 
-    e_input_output = data_converter.to_tensors(end_note_seq)
-    # print("e_input_output:", e_input_output)
-    e_tensors = e_input_output[0] if e_input_output[0] else e_input_output[1]
-    end_tensors = data_converter.from_tensors(e_tensors)
 
     # fallback if either list is empty
     if not start_tensors and not end_tensors:
@@ -224,13 +321,17 @@ def interpolate_melody_tensors(
     start_tensor = next((t for t in start_tensors if t.total_time > 3.5), start_tensors[0])
     end_tensor = next((t for t in end_tensors if t.total_time > 3.5), end_tensors[0])
 
-    note_sequences = music_vae.interpolate(
-        start_tensor,
-        end_tensor,
-        num_steps=num_steps,
-        length=max_length,
-        temperature=temperature,
-    )
+    try:
+        note_sequences = music_vae.interpolate(
+            start_tensor,
+            end_tensor,
+            num_steps=num_steps,
+            length=max_length,
+            temperature=temperature,
+        )
+    except Exception as e:
+        print(f"Interpolation failed: {e}")
+
     return note_sequences
 
 
@@ -240,6 +341,10 @@ def melody_interpolation(start_midi_path, end_midi_path, interp_output_path , nu
     interpolated_seq = interpolate_melody_tensors(
         start_note_seq, end_note_seq, num_steps, config_name="cat-mel_2bar_big"
     )
+    print("interpolated_seq type:", type(interpolated_seq))
+    print("interpolated_seq length:", len(interpolated_seq))
+    print("interpolated_seq:", interpolated_seq)
+
     if is_first == True:
         concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path)
     elif is_first == False:
@@ -268,7 +373,7 @@ def generate_melody_from_sequence(sequence, interp_output_path):
         end_midi_path = sequence[(i + 1) % len(sequence)]
         print("end_midi_path:", end_midi_path)
         is_first = True if i == 0 else (None if i == len(sequence) - 1 else False)
-        print('f{num_steps[i]}:', num_steps[i])
+        # print('f{num_steps[i]}:', num_steps[i])
         melody_interpolation(start_midi_path, end_midi_path, interp_output_path, num_steps[i], is_first)
     print("Melody generation completed.")
 
@@ -304,7 +409,7 @@ def interpolate_drum_tensors(
 def drum_interpolation(start_midi_path, end_midi_path, interp_output_path, num_steps, is_first):
     start_note_seq, end_note_seq = path_to_note_seq(start_midi_path, end_midi_path)
     interpolated_seq = interpolate_drum_tensors(start_note_seq, end_note_seq, num_steps)
-    print("interpolated_seq:", interpolated_seq)
+    # print("interpolated_seq:", interpolated_seq)
     if is_first == True:
         concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path)
     elif is_first == False:
@@ -317,7 +422,7 @@ def drum_interpolation(start_midi_path, end_midi_path, interp_output_path, num_s
         concate_interpolation(first_inp_note_seq, is_first, interpolated_seq, interp_output_path)
     interpolated_note_sequence = note_seq.midi_io.midi_file_to_note_sequence(interp_output_path)
 
-    print("drum interpolate generated")
+    # print("drum interpolate generated")
     return interpolated_note_sequence
 
 def drumify(s, temperature=1.0):
@@ -423,118 +528,50 @@ def interpolated_groove(start_path, end_path, interp_output_path, steps =2):
     return interpolated_seq
   
 
+# #import magenta.music as mm
+# import note_seq
+# from note_seq.protobuf import music_pb2
 
-# def generate_drum_seq(melody_seq, output_file_path):
-#     def split_and_normalize_note_sequence(note_sequence, tpb, qpm):
-#         ticks_per_two_bars = tpb * 4 * 2
-#         seconds_per_tick = 60.0 / (qpm * tpb)
-#         seconds_per_two_bars = ticks_per_two_bars * seconds_per_tick
+# def normalize_to_zero(seq):
+#     if not seq.notes:
+#         return seq
+#     min_start = min(n.start_time for n in seq.notes)
+#     for n in seq.notes:
+#         n.start_time -= min_start
+#         n.end_time -= min_start
+#     return seq
 
-#         def create_segment_with_metadata(start_time, end_time):
-#             segment = note_seq.NoteSequence()
-#             segment.ticks_per_quarter = note_sequence.ticks_per_quarter
-#             segment.time_signatures.extend(note_sequence.time_signatures)
-#             segment.tempos.extend(note_sequence.tempos)
-#             segment.total_time = min(
-#                 4, end_time - start_time
-#             )  # Normalize total time to max 4 seconds per segment
-#             segment.source_info.CopyFrom(note_sequence.source_info)
-#             segment.instrument_infos.extend(note_sequence.instrument_infos)
-#             for note in note_sequence.notes:
-#                 if note.start_time >= start_time and note.start_time < end_time:
-#                     new_note = segment.notes.add()
-#                     new_note.CopyFrom(note)
-#                     new_note.start_time -= start_time
-#                     new_note.end_time -= start_time
-#             return segment
+# def midi_path_to_note_sequence(midi_path):
+#     pm = mm.midi_io.midi_file_to_note_sequence(midi_path)
+#     return pm
 
-#         total_duration = note_sequence.total_time
-#         segments = []
-#         current_start = 0
-#         while current_start < total_duration:
-#             current_end = min(current_start + seconds_per_two_bars, total_duration)
-#             segment = create_segment_with_metadata(current_start, current_end)
-#             segments.append(segment)
-#             current_start = current_end
-#         return segments
+# def concatenate_two_midis(midi_path_1, midi_path_2, output_path, segment_duration=4.0):
+#     seq1 = midi_path_to_note_sequence(midi_path_1)
+#     seq2 = midi_path_to_note_sequence(midi_path_2)
+    
+#     seq1 = normalize_to_zero(seq1)
+#     print(f"seq1 total time: {seq1.total_time:.3f}")
+#     print(f"seq1 notes:", seq1.notes)
 
-#     two_bar_segments = split_and_normalize_note_sequence(melody_seq, 220, 120)
-#     midi_ls = []
-#     for i, segment in enumerate(two_bar_segments):
-#         print(f"\nSegment {i + 1} has {len(segment.notes)} notes")
-#         # output_drum_path = f"temp/output_drum_sequence_{i}.mid"
-#         output_drum_path = str(Path("temp") / f"output_drum_sequence_{i}.mid")
-#         drum_seq = drumify(segment, temperature=1.0)
-#         note_seq.sequence_proto_to_midi_file(drum_seq, output_drum_path)
-#         midi_ls.append(output_drum_path)
-#     midi.concatenate(midi_ls, output_file_path)
-#     print("Drum sequence generated")
-#     return md.MidiFile(output_file_path)
+#     seq2 = normalize_to_zero(seq2)
+#     print(f"seq2 total time: {seq2.total_time:.3f}")
+#     print(f"seq2 notes:", seq2.notes)
 
-# musicVAE interpolation functions
+#     all_seq = [seq1, seq2]
+#     durations = [segment_duration] * 2
 
-# def melody_interpolation(start_idx, end_idx, intp_idx , track, num_steps, is_first):
-#     # start_midi_path = f"./results/{track}_mid/cough_{start_idx}.mid"
-#     start_midi_path = str(Path("results") / f"{track}_mid" / f"{track}_{start_idx}.mid")
-#     end_midi_path = str(Path("results") / f"{track}_mid" / f"{track}_{end_idx}.mid")
-#     interp_output_path = str(Path("tracks") / f"{track}_mid" / f"{track}_{intp_idx}.mid")
-#     start_note_seq, end_note_seq = path_to_note_seq(start_midi_path, end_midi_path)
-#     interpolated_seq = interpolate_melody_tensors(
-#         start_note_seq, end_note_seq, num_steps, config_name="cat-mel_2bar_big"
-#     )
-#     if is_first == True:
-#         concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path)
-#     elif is_first == False:
-#         first_inp_mid = pretty_midi.PrettyMIDI(interp_output_path)
-#         first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
-#         concate_interpolation(first_inp_note_seq, end_note_seq, interpolated_seq, interp_output_path)
-#     elif is_first == None:
-#         first_inp_mid = pretty_midi.PrettyMIDI(interp_output_path)
-#         first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
-#         concate_interpolation(first_inp_note_seq, is_first, interpolated_seq, interp_output_path)
-#     interpolated_note_sequence = note_seq.midi_io.midi_file_to_note_sequence(interp_output_path)
-#     print("melody interpolate generated")
-#     # return interpolated_note_sequence
+#     final_seq = mm.sequences_lib.concatenate_sequences(all_seq, durations)
+#     for note in final_seq.notes:
+#         print(f"{note.start_time:.3f}", note.pitch)
+#     mm.sequence_proto_to_midi_file(final_seq, output_path)
+#     print(f"Saved concatenated MIDI to: {output_path}")
 
+# # Example usage:
+# concatenate_two_midis(
+#     './media/public_motif/mel_mid/mel_11.mid',
+#     './media/public_motif/mel_mid/mel_15.mid',
+#     './concatenated.mid',
+#     segment_duration=4.0
+# )
 
-
-
-
-# def drum_accompany(melody_seq, drum_output_path):
-#     drum_midi = generate_drum_seq(melody_seq, drum_output_path)
-#     print("Drum sequence generated")
-#     return drum_midi
-
-
-# mel_seq1 =  note_seq.midi_io.midi_file_to_note_sequence('./cough_to_midi/midis/cough_6.mid')
-# mel_seq2 =  note_seq.midi_io.midi_file_to_note_sequence('./cough_to_midi/midis/cough_1.mid')
-# mel_seq3 =  note_seq.midi_io.midi_file_to_note_sequence('./cough_to_midi/midis/cough_15_q.mid')
-
-# drum_accompany(mel_seq1, './temp/drum_output.mid')
-# drum_accompany(mel_seq2, './temp/drum_output2.mid')
-# drum_accompany(mel_seq3, './temp/drum_output3.mid')
-
-# def generate_melody_from_sequence(sequence, track, id):
-#     """Generates melodies based on the given order."""
-#     num_steps_map = {2: [3, 3], 3: [1, 1, 3], 4: [1, 1, 1, 1]}
-#     if len(sequence) not in num_steps_map:
-#         raise ValueError("Only sequences of length 2, 3, or 4 are supported.")
-#     num_steps = num_steps_map[len(sequence)]
-#     print(f"Generating melody for track: {track} with sequence {sequence}")
-#     # Generate interpolations in order
-#     for i in range(len(sequence)):
-#         start_idx = sequence[i]
-#         end_idx = sequence[(i + 1) % len(sequence)]
-#         is_first = True if i == 0 else (None if i == len(sequence) - 1 else False)
-#         melody_interpolation(start_idx, end_idx, id, track, num_steps[i], is_first)
-
-#     print("Melody generation completed.")
-        
-# melody_generation([16, 15, 1], 'bass', 1)
-
-# melody_interpolation('./cough_to_midi/midis/cough_8_q.mid', './cough_to_midi/midis/cough_5_q.mid', 'temp/interpolated_acc.mid', 3, True)
-# int_seq = note_seq.midi_io.midi_file_to_note_sequence('temp/interpolated.mid')
-# drum_accompany(int_seq, './temp/drum_output.mid')
-# drum_interpolation('media\public_music\drum_mid\drum_15.mid', 'media\public_music\drum_mid\drum_15.mid', 'media\public_music\drum_mid\k.mid', 3, True)
-# drum_interpolation('media\public_music\drum_mid\drum_15.mid', 'media\public_music\drum_mid\drum_15.mid', 'media\public_music\drum_mid\k.mid', 3, None)
-
+# melody_interpolation('./media/public_motif/mel_mid/mel_11.mid','./media/public_motif/mel_mid/mel_15.mid', './interpolated.mid', 3, True)

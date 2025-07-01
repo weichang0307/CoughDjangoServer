@@ -170,7 +170,7 @@ def write_midi_pretty(selected_coughs, df, folder_path, output_midi, db_scale=30
             print(f"Warning: File {audio_path} not found.")
             continue
         audio_data, sr = audio.load_from_file(audio_path)
-        print(f"Processing {cough_id}...", "drum_type:", drum_type)
+        # print(f"Processing {cough_id}...", "drum_type:", drum_type)
         onset_times = detect(audio_data, sr)
         onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
         
@@ -232,3 +232,118 @@ def generate_drum_motif(folder_path, target_id, output_midi):
     write_midi_pretty(selected_coughs, df, folder_path, output_midi)
     
     print(f"Drum motif generation to {output_midi } completed.")
+
+def write_midi_pretty_manual(selected_coughs, df, cough_path_list, output_midi, db_scale=30):
+    drum_mapping = {
+        "kick": 36,
+        "snare": 38,
+        "closed_hihat": 42,
+        "open_hihat": 46,
+        "mid_tom": 50,
+        "low_tom": 45,
+        "crash": 49
+    }
+    
+    velocity_mapping = {
+        "kick": 90,
+        "snare": 95,
+        "closed_hihat": 80,
+        "open_hihat": 65,
+        "mid_tom": 90,
+        "low_tom": 90,
+        "crash": 70
+    }
+    
+    mid = pretty_midi.PrettyMIDI()
+
+    # map id to file path
+    id_to_path = {os.path.splitext(os.path.basename(path))[0]: path for path in cough_path_list}
+
+    for drum_type, cough_id in selected_coughs.items():
+        row = df[df["name"] == cough_id]  # <-- use "name" here
+        if row.empty:
+            print(f"Warning: No data found for ID {cough_id}")
+            continue
+        audio_path = id_to_path[cough_id]
+        if not os.path.exists(audio_path):
+            print(f"Warning: File {audio_path} not found.")
+            continue
+        audio_data, sr = audio.load_from_file(audio_path)
+        onset_times = detect(audio_data, sr)
+        onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
+        
+        onset_loudness = [compute_loudness(audio_data[int(start * sr):int(end * sr)]) 
+                          for start, end in zip(onset_times, offset_times)]
+        if not onset_loudness:
+            continue
+        baseline_loudness = np.mean(onset_loudness)
+        loudness_diffs = [loud - baseline_loudness for loud in onset_loudness]
+        actual_max_diff = max(abs(min(loudness_diffs)), abs(max(loudness_diffs)))
+        
+        drum_track = pretty_midi.Instrument(program=0, is_drum=True)
+        for onset_time, diff in zip(onset_times, loudness_diffs):
+            if actual_max_diff != 0:
+                normalized_diff = (diff / actual_max_diff) * db_scale
+            else:
+                normalized_diff = 0
+            base_velocity = velocity_mapping.get(drum_type, 90)
+            final_velocity = int(np.clip(base_velocity + normalized_diff, 1, 127))
+            note = pretty_midi.Note(
+                velocity=final_velocity,
+                pitch=drum_mapping.get(drum_type, 38),
+                start=onset_time,
+                end=onset_time + 0.125
+            )
+            drum_track.notes.append(note)
+        mid.instruments.append(drum_track)
+    
+    mid.write(output_midi)
+    merge_midi_tracks(output_midi, output_midi)
+    print(f"MIDI file saved: {output_midi}")
+
+
+
+ALL_DRUMS = ['kick', 'snare', 'closed_hihat', 'open_hihat', 'mid_tom', 'low_tom', 'crash']
+
+def process_manual_coughs(cough_path_list, seed=42):
+    data = []
+    for path in cough_path_list:
+        file_name = os.path.splitext(os.path.basename(path))[0]
+        audio_data, sr = audio.load_from_file(path)
+        onset_times = detect(audio_data, sr)
+        onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
+        durations = compute_durations(onset_times, offset_times)
+        avg_duration = np.mean(durations)
+        loudness_values = [compute_loudness(audio_data[int(start * sr):int(end * sr)]) 
+                           for start, end in zip(onset_times, offset_times)]
+        avg_loudness = np.mean(loudness_values)
+        data.append([file_name, avg_duration, avg_loudness])
+
+    df = pd.DataFrame(data, columns=["name", "avg_duration", "avg_loudness"])
+    df = normalize_and_rank(df)
+    df = classify_coughs(df)
+
+    # group by drum type
+    drum_groups = df.groupby("drum")
+    selected_coughs = {}
+
+    for drum, group in drum_groups:
+        selected_row = group.sample(n=1, random_state=seed)
+        selected_coughs[drum] = selected_row["name"].values[0]
+
+    # handle missing drums
+    assigned_ids = set(selected_coughs.values())
+    remaining = df[~df["name"].isin(assigned_ids)]
+
+    for drum in ALL_DRUMS:
+        if drum not in selected_coughs:
+            if not remaining.empty:
+                random_row = remaining.sample(n=1, random_state=seed)
+                selected_coughs[drum] = random_row["name"].values[0]
+                remaining = remaining[remaining["name"] != random_row["name"].values[0]]
+            else:
+                # fallback if not enough unique coughs
+                random_existing = random.choice(list(assigned_ids))
+                selected_coughs[drum] = random_existing
+
+    return selected_coughs, df

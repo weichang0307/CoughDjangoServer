@@ -50,7 +50,7 @@ def detect_offsets(audio_data, sr, onset_times):
 
         # Find next low-energy point AFTER onset
         for j in range(onset_idx, len(rms_energy)):
-            if rms_energy[j] < 0.1 * rms_energy[onset_idx]:  # Energy threshold
+            if rms_energy[j] < 0.2 * rms_energy[onset_idx]:  # Energy threshold
                 offset = frame_times[j]
                 break
 

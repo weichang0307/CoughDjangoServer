@@ -14,11 +14,13 @@ import datetime
 from threading import Thread
 from queue import Queue
 import warnings
+
 warnings.filterwarnings("ignore", category=UserWarning, module="pyloudnorm")
 import wave
+from pathlib import Path
 
-USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicProficiency', 'isCoughPublish', 'userEmail']
-COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time']
+USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicProficiency', 'isCoughPublish', 'userEmail','bestSong1','bestSong2','bestSong3','isSmoker']
+COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time', 'latitude', 'longitude']
 MUSIC_TABLE_COLUMNS = ['filename', 'timestamp', 'time']
 
 
@@ -68,6 +70,8 @@ def create_cough_audio(request):
             metadata_dict = json.loads(metadata)
             userid = metadata_dict.get('userId')
             filename = metadata_dict.get('fileName')
+            latitude = metadata_dict.get('latitude')
+            longitude = metadata_dict.get('longitude')
             time = filename
             filename = os.path.join('', filename + '.wav')
             if not isinstance(filename, str):
@@ -93,16 +97,16 @@ def create_cough_audio(request):
             if isCoughPub:
                 folder_path_public = os.path.join(settings.MEDIA_ROOT, 'public_cough')
                 # os.makedirs(folder_path_public, exist_ok=True)
-                print("folder_path_public: ", folder_path_public)
                 existing_files= os.listdir(folder_path_public)
                 file_count = len(existing_files)
-                print("file_count: ", file_count)
                 filename = f"{file_count + 1}.wav"  # 你可以根據需要調整檔案名稱格式
                 
                 file_path_public = os.path.join(folder_path_public, filename)
                 save_pcm16_to_wav(file_path_public, audio_data, sample_rate)
-        
-            cough_table_data = {'filename': filename, 'timestamp': datetime.datetime.now().timestamp(), 'pubCoughID' : file_count+1, 'time' : time}
+
+            print('latitude: ', latitude)
+            print('longitude: ', longitude)
+            cough_table_data = {'filename': filename, 'timestamp': datetime.datetime.now().timestamp(), 'pubCoughID' : file_count+1, 'time' : time, 'latitude': latitude, 'longitude': longitude}
             update_cough_table(userid, cough_table_data)
             return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
         except Exception as e:
@@ -142,7 +146,6 @@ def get_coughs(request):
                         "timestamp": formatted_timestamp,
                         "duration": duration
                     }
-                    print("audio_record: ", audio_record)
                     audio_records.append(audio_record)
 
             return JsonResponse(audio_records, safe=False, status=200)
@@ -172,16 +175,20 @@ def get_music(request):
             upload_folder_normal = os.path.join(settings.MEDIA_ROOT, userid, 'generated_music')
             upload_folder_trio = os.path.join(settings.MEDIA_ROOT, userid, 'generated_trio')
             upload_folder_drum = os.path.join(settings.MEDIA_ROOT, userid, 'generated_drum')
+            upload_folder_drum_manual = os.path.join(settings.MEDIA_ROOT, userid, 'generated_manual_drum')
+            upload_folder_trio_manual = os.path.join(settings.MEDIA_ROOT, userid, 'generated_manual_trio')
             os.makedirs(upload_folder_normal, exist_ok=True)
             os.makedirs(upload_folder_trio, exist_ok=True)
             os.makedirs(upload_folder_drum, exist_ok=True)
+            os.makedirs(upload_folder_drum_manual, exist_ok=True)
+            os.makedirs(upload_folder_trio_manual, exist_ok=True)
+            
             
             # 使用 os.walk() 遞迴遍歷資料夾
             for root, dirs, files in os.walk(upload_folder_normal):
                 for filename in files:
                     if filename.endswith('.wav'):  # 只處理 WAV 檔案
                         file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
-                        print("relative_path: ", file_path)
 
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
@@ -199,7 +206,7 @@ def get_music(request):
                             "filePath": file_path,
                             "timestamp": formatted_timestamp,
                             "duration": duration,
-                            "type": "normal"
+                            "type": "normal" 
                         }
                         audio_records.append(audio_record)
              # 使用 os.walk() 遞迴遍歷資料夾
@@ -207,7 +214,6 @@ def get_music(request):
                 for filename in files:
                     if filename.endswith('.wav'):  # 只處理 WAV 檔案
                         file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
-                        print("relative_path: ", file_path)
 
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
@@ -233,7 +239,6 @@ def get_music(request):
                 for filename in files:
                     if filename.endswith('.wav'):  # 只處理 WAV 檔案
                         file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
-                        print("relative_path: ", file_path)
 
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
@@ -255,7 +260,56 @@ def get_music(request):
                         }
                         audio_records.append(audio_record)
 
-            print("audio_records: ", audio_records)
+            for root, dirs, files in os.walk(upload_folder_drum_manual):
+                for filename in files:
+                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
+                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
+
+                        timestamp = os.path.getmtime(file_path)
+                        formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    
+                        with wave.open(file_path, 'r') as wav_file:
+                            frames = wav_file.getnframes()
+                            rate = wav_file.getframerate()
+                            duration_seconds = frames / float(rate)
+                            minutes, seconds = divmod(round(duration_seconds), 60)
+                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
+                        
+                        # 建立音訊紀錄字典
+                        audio_record = {
+                            "filename": filename.replace('.wav', ''),
+                            "filePath": file_path,
+                            "timestamp": formatted_timestamp,
+                            "duration": duration,
+                            "type": "drum_manual"
+                        }
+                        audio_records.append(audio_record)
+
+            for root, dirs, files in os.walk(upload_folder_trio_manual):
+                for filename in files:
+                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
+                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
+
+                        timestamp = os.path.getmtime(file_path)
+                        formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    
+                        with wave.open(file_path, 'r') as wav_file:
+                            frames = wav_file.getnframes()
+                            rate = wav_file.getframerate()
+                            duration_seconds = frames / float(rate)
+                            minutes, seconds = divmod(round(duration_seconds), 60)
+                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
+                        
+                        # 建立音訊紀錄字典
+                        audio_record = {
+                            "filename": filename.replace('.wav', ''),
+                            "filePath": file_path,
+                            "timestamp": formatted_timestamp,
+                            "duration": duration,
+                            "type": "trio_manual"
+                        }
+                        audio_records.append(audio_record)
+
             return JsonResponse(audio_records, safe=False, status=200)
 
         except Exception as e:
@@ -303,7 +357,6 @@ def save_music(request):
             metadata_dict = json.loads(request.body)
             userid = metadata_dict.get('userId')
             uuid = metadata_dict.get('uuid')
-            print("uuid: ", uuid)
             fileName = metadata_dict.get('fileName')
             type = metadata_dict.get('type')
             remove_job_by_uuid(completed_jobs, uuid)
@@ -372,7 +425,6 @@ def set_user_info(request):
         try:
             metadata_dict = json.loads(request.body)
             user_id = metadata_dict.get('userId')
-            print("user_id: ", user_id)
             user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
             user_table_path = os.path.join(user_folder, f'{user_id}.csv')
             
@@ -619,7 +671,6 @@ def upload_to_public_cough(request):
             audio_data = audio_file.read()
             
             # 接收音頻數據 
-            print("Receiving audio data...")
             file_path = os.path.join(settings.IMPORT_COUGH_FOLDER, filename)
             save_pcm16_to_wav(file_path, audio_data, sample_rate)
             
@@ -650,11 +701,9 @@ def upload_to_public_music(request):
             audio_data = audio_file.read()
             
             # 接收音頻數據 
-            print("Receiving audio data...")
             file_path = os.path.join(settings.PUBLIC_MUSIC, filename)
             
             save_pcm16_to_wav(file_path, audio_data, sample_rate)
-            print("file save to: ", file_path)
             
             # 假設音頻數據為 float32 格式的原始數據流
             return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
@@ -711,25 +760,10 @@ def delete_music(request):
         try:         
             # 假設音頻數據為 float32 格式的原始數據流
             metadata_dict = json.loads(request.body)
-            user_id = metadata_dict.get('userId')
             deleted_music = metadata_dict.get('targetList')
 
-            music_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_music')
-            os.makedirs(music_folder, exist_ok=True)
-            music_table_path = os.path.join(music_folder, 'music_table.csv')
-
-            # 讀取現有的 CSV 文件
-            df = pd.read_csv(music_table_path)
-
             for i in deleted_music:
-                df = df[df['filename'] != i['filename']]
-                temp = os.path.dirname(i['filePath'])
-                shutil.rmtree(temp)
-
-    
-            # 保存更新後的 DataFrame 到 CSV 文件
-            df.to_csv(music_table_path, index=False)
-            
+                os.remove(i)           
        
             return JsonResponse({'message': 'start audio.'}, status=200)
         except Exception as e:
@@ -737,6 +771,46 @@ def delete_music(request):
             return JsonResponse({'error': str(e)}, status=400)
 
     return JsonResponse({'error': 'Invalid request method'}, status=400)
+
+
+@csrf_exempt
+def refresh_best_song(request):
+    if request.method == 'POST':
+        try:
+            metadata_dict = json.loads(request.body)
+            userid = metadata_dict.get('userId')
+            target = metadata_dict.get('target', '')
+
+            user_folder = os.path.join(settings.MEDIA_ROOT, userid)
+            user_table_path = os.path.join(user_folder, f'{userid}.csv')
+
+            # 檢查 CSV 文件是否存在
+            if not os.path.exists(user_table_path):
+                return JsonResponse({'error': f'User table {user_table_path} does not exist.'}, status=400)
+ 
+            df = pd.read_csv(user_table_path)
+
+            if target == '':
+                # get 模式，回傳 bestSong 欄位
+                best_song1 = df.loc[0, 'bestSong1'] if 'bestSong1' in df.columns else ''
+                best_song2 = df.loc[0, 'bestSong2'] if 'bestSong2' in df.columns else ''
+                best_song3 = df.loc[0, 'bestSong3'] if 'bestSong3' in df.columns else ''
+                return JsonResponse({'bestSong1': best_song1,'bestSong2': best_song2,'bestSong3': best_song3}, status=200)
+            else:
+                # set 模式，更新 bestSong 欄位
+                df.loc[0, 'bestSong3'] = df.loc[0, 'bestSong2']
+                df.loc[0, 'bestSong2'] = df.loc[0, 'bestSong1']
+                df.loc[0, 'bestSong1'] = target
+                df.to_csv(user_table_path, index=False)
+                return JsonResponse({'bestSong1': df.loc[0, 'bestSong1'],'bestSong2': df.loc[0, 'bestSong2'],'bestSong3': df.loc[0, 'bestSong3']}, status=200)
+
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+
+    return JsonResponse({'error': 'Invalid request method'}, status=400)
+
+
 
 @csrf_exempt
 def rename_music(request):
@@ -759,7 +833,6 @@ def rename_music(request):
             for folder in folders_to_search:
                 # 確保資料夾存在
                 if not os.path.exists(folder):
-                    print(f"{folder} 資料夾不存在！")
                     continue
         
                 # 遍歷資料夾中的所有子資料夾
@@ -767,7 +840,6 @@ def rename_music(request):
                     # 檢查是否有資料夾名稱為 oldname
                     if os.path.basename(root) == oldName:
                         # 找到目標資料夾，接著處理其中的檔案
-                        print(f"處理資料夾: {root}")
                 
                         # 遍歷資料夾中的所有檔案
                         for file in files:
@@ -778,13 +850,11 @@ def rename_music(request):
                         
                                 # 重命名檔案
                                 os.rename(old_file_path, new_file_path)
-                                print(f"檔案已重命名: {old_file_path} -> {new_file_path}")
                 
                         # 重命名資料夾
                         new_folder_name = root.replace(oldName, name)
                         if root != new_folder_name:
                             os.rename(root, new_folder_name)
-                            print(f"資料夾已重命名: {root} -> {new_folder_name}")
 
             music_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_music')
             os.makedirs(music_folder, exist_ok=True)
@@ -833,10 +903,20 @@ def generate(request):
         data = json.loads(request.body.decode("utf-8"))
         mode = data.get('mode', 'normal')
         uuid = data.get('uuid')
+        userId = data.get('user_id')
+        coughlist_str = data.get('cough_path', None)
+        coughlist_path = [p for p in (coughlist_str.split('^') if coughlist_str else []) if p]
+        coughlist = [Path(p) for p in coughlist_path]
+        cough_length =len(coughlist_path)
+        # print("coughlist: ", coughlist)
+        # print("cough_length: ", cough_length)
+        if cough_length == 7:
+            mode  =  'drum_manual'
+        elif cough_length == 2 or cough_length == 3 or cough_length == 4:
+            mode = 'trio_manual'
         if not mode or not uuid:
             return JsonResponse({'error': 'Missing mode or uuid'}, status=400)
-
-        job = GenerateJob(mode, data, uuid)
+        job = GenerateJob(mode, data, uuid, userId, coughlist)
         generate_task_queue.put(job)  # 將 job 放入 queue
         task_progress[uuid] = job  # 將 job 存入 task_progress
         return JsonResponse({'status': 'queued', 'uuid': uuid}, status=202)
@@ -845,7 +925,9 @@ def generate(request):
 
 @csrf_exempt
 def generate_status_view(request):
-    uuid = request.GET.get('uuid')
+    data = json.loads(request.body.decode("utf-8"))
+    uuid = data.get('uuid')
+    userId = data.get('userId')
     
     # 如果有指定 uuid，返回該 uuid 的狀態
     if uuid:
@@ -861,7 +943,14 @@ def generate_status_view(request):
             }, status=200)
         return JsonResponse({'error': 'UUID not found'}, status=404)
 
-    # 如果沒有指定 uuid，返回所有 queue、processing 和 completed 的物件
+    # 過濾 function
+    def filter_by_user(jobs):
+        if userId:
+            return [job for job in jobs if getattr(job, 'user_id', None) == userId]
+        return list(jobs)
+    
+
+    # 如果有指定 user_id，返回該 user_id 的所有 queue、processing 和 completed 的物件
     queued_jobs = [
         {
             'uuid': job.uuid,
@@ -869,10 +958,10 @@ def generate_status_view(request):
             'time': job.time,
             'duration': job.duration,
             'status': 'queued',
-            'cough_path':job.data['cough_path'],
+            'cough_path': job.data['cough_path'],
             'result': job.result
         }
-        for job in generate_task_queue.queue
+        for job in filter_by_user(generate_task_queue.queue)
     ]
 
     processing_jobs_status = [
@@ -884,7 +973,7 @@ def generate_status_view(request):
             'status': 'processing',
             'result': job.result
         }
-        for job in processing_jobs
+        for job in filter_by_user(processing_jobs)
     ]
 
     completed_jobs_status = [
@@ -896,9 +985,8 @@ def generate_status_view(request):
             'status': 'completed',
             'result': job.result
         }
-        for job in completed_jobs
+        for job in filter_by_user(completed_jobs)
     ]
-
 
     all_jobs = queued_jobs + processing_jobs_status + completed_jobs_status
     return JsonResponse({

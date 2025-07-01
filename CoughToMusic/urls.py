@@ -26,4 +26,5 @@ urlpatterns = [
     path('save_music_cocreate/', views.save_music_cocreate, name='save_music_cocreate'),
     path('generate/', views.generate, name='generate'),
     path('generate_status_view/', views.generate_status_view, name='generate_status_view'),
+    path('refresh_best_song/', views.refresh_best_song, name='refresh_best_song'),
 ]

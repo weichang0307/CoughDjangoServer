@@ -101,6 +101,25 @@ def normalize_key_name_with_midi(key_name):
     normalized_name = midi_to_note[midi_value]  
     return normalized_name
 
+from mido import MidiFile, MidiTrack, Message
+
+def update_midi_program(midi_path, output_path, program_number, channel=0):
+    mid = MidiFile(midi_path)
+    new_mid = MidiFile(ticks_per_beat=220)
+    for i, track in enumerate(mid.tracks):
+        new_track = MidiTrack()
+        new_mid.tracks.append(new_track)
+        program_set = False
+        for msg in track:
+            if not program_set and msg.type == 'program_change' and msg.channel == channel:
+                msg = Message('program_change', program=program_number, channel=channel, time=msg.time)
+                program_set = True
+            elif not program_set and msg.type == 'note_on' and msg.channel == channel:
+                new_track.append(Message('program_change', program=program_number, channel=channel, time=0))
+                program_set = True
+            new_track.append(msg)
+    new_mid.save(output_path)
+
 # midi to audio
 
 import os
@@ -131,6 +150,9 @@ def write_from_midi(midi_file, output_file, sf="drum"):
     soundfonts = {
         "piano": os.path.join(current_path, "soundfonts", "Yamaha_C3_Grand_Piano.sf2"),
         "drum": os.path.join(current_path, "CoughToMusic\cocreate\soundfonts", "alex_gm.sf2"),
+        "violin": os.path.join(current_path,  "CoughToMusic\cocreate\soundfonts", "Violin.sf2"),
+        "guitar": os.path.join(current_path, "soundfonts", "Guitar.sf2"), 
+        "saxophone": os.path.join(current_path, "soundfonts", "Saxophone.sf2"),
     }
 
     if sf not in soundfonts:
@@ -161,7 +183,7 @@ def write_from_midi(midi_file, output_file, sf="drum"):
     elif process.stderr.strip():
         print(f"Warning: FluidSynth stderr: {process.stderr.strip()}")
     else:
-        audio.gain_db_from_wav(output_file, 10)
+        audio.gain_db_from_wav(output_file, 5)
         print(f"WAV file successfully generated: {output_file}")
 
 
@@ -240,7 +262,7 @@ def to_2bars(ori_midi_path, preprocessed_midi_path, default_tempo=True):
 
     new_mid = adjust_ticks_per_beat(new_mid, 220)
     new_mid.save(preprocessed_midi_path)
-    print(f"Converted {ori_midi_path} to {preprocessed_midi_path} with 2 bars, 120 QPM, and 220 ticks per quarter note.")
+    # print(f"Converted {ori_midi_path} to {preprocessed_midi_path} with 2 bars, 120 QPM, and 220 ticks per quarter note.")
     # return new_mid
 
 
@@ -309,9 +331,9 @@ def concatenate(midi_files, output_file_path, sec = 4.0, tpb=220, qpm=120):
                 if not msg.is_meta:
                     if track_time == 0:
                         offset = two_bar_tick - prev_total_time
-                        print(f"offset: {offset}")
+                        # print(f"offset: {offset}")
                         msg.time += offset
-                        print(f"after msg.time: {msg.time}")
+                        # print(f"after msg.time: {msg.time}")
                     track_time += msg.time
                 output_track.append(msg)
             prev_total_time = track_time - offset
@@ -370,9 +392,9 @@ def print_midi_information(midi_file_path):# Load the MIDI file into a NoteSeque
 def note_shift(midi_file_path, desired_key):
     midi_stream = converter.parse(midi_file_path)
     current_key = midi_stream.analyze('key')
-    print(f"Current key of the MIDI file: {current_key.tonic.name} {current_key.mode}")
+    # print(f"Current key of the MIDI file: {current_key.tonic.name} {current_key.mode}")
     transpose_interval = interval.Interval(current_key.tonic, desired_key.tonic)
-    print(f"Interval to transpose: {transpose_interval.semitones} semitones ({transpose_interval.directedName})")
+    # print(f"Interval to transpose: {transpose_interval.semitones} semitones ({transpose_interval.directedName})")
     transposed_stream = midi_stream.transpose(transpose_interval)
     transposed_stream.write('midi', fp=midi_file_path)
 
@@ -384,7 +406,7 @@ def snap_on_grid_noteseq(midi_file_path, output_file_path, quantization_level):
     qpm = note_sequence.tempos[0].qpm
     seconds_per_beat = 60.0 / qpm
     grid_interval = seconds_per_beat / (quantization_level / 4)
-    print(f"Quantizing with qpm={qpm}, grid_interval={grid_interval}")
+    # print(f"Quantizing with qpm={qpm}, grid_interval={grid_interval}")
     # Iterate and quantize notes
     for note in note_sequence.notes:
         # print(f"Original program: {note.program}, instrument: {note.instrument}, is_drum: {note.is_drum}")
@@ -397,7 +419,7 @@ def snap_on_grid_noteseq(midi_file_path, output_file_path, quantization_level):
     # Convert back to MIDI and save
     quantized_midi = note_seq.midi_io.note_sequence_to_pretty_midi(note_sequence)
     quantized_midi.write(output_file_path)
-    print(f"Quantized MIDI saved as {output_file_path}")
+    # print(f"Quantized MIDI saved as {output_file_path}")
     return note_sequence
 
 # snap_on_grid_noteseq('./temp/dy_1.mid', './quantized_output.mid', 16)

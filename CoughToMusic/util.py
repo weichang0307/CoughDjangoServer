@@ -59,7 +59,6 @@ def save_music_move(user_id, uuid, filename_display, type):
     """
     修正後的 save_music_move 確保最內層的檔案名稱是 filename 而不是 uuid。
     """
-    print(f"save_music_move: {user_id}, {uuid}, {filename_display}")
 
     if not uuid or not filename_display:
         print("Error: filename or filename_display is empty.")
@@ -71,6 +70,7 @@ def save_music_move(user_id, uuid, filename_display, type):
         raise ValueError("user_id is not provided")
     
     user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
+
 
     ### 處理 generated_music 資料夾 ###
     
@@ -92,6 +92,20 @@ def save_music_move(user_id, uuid, filename_display, type):
         old_music_folder = os.path.join(user_folder, 'temp_drum')
         new_music_folder = os.path.join(drum_new_fp, filename_display)
         os.makedirs(new_music_folder, exist_ok=True)
+    elif type == 'trio_manual':
+        drum_new_fp = os.path.join(user_folder, 'generated_manual_trio')
+        #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
+        os.makedirs(drum_new_fp, exist_ok=True)
+        old_music_folder = os.path.join(user_folder, 'temp_manual_trio')
+        new_music_folder = os.path.join(drum_new_fp, filename_display)
+        os.makedirs(new_music_folder, exist_ok=True)
+    elif type == 'drum_manual':
+        drum_new_fp = os.path.join(user_folder, 'generated_manual_drum')
+        #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
+        os.makedirs(drum_new_fp, exist_ok=True)
+        old_music_folder = os.path.join(user_folder, 'temp_manual_drum')
+        new_music_folder = os.path.join(drum_new_fp, filename_display)
+        os.makedirs(new_music_folder, exist_ok=True)
         #togo
     else:
         #music_folder = os.path.join(user_folder, 'generated_music')
@@ -100,7 +114,7 @@ def save_music_move(user_id, uuid, filename_display, type):
         old_music_folder = os.path.join(user_folder, 'temp_music', uuid)
         new_music_folder = os.path.join(music_folder, filename_display)
         os.makedirs(new_music_folder, exist_ok=True)
-
+    
     if os.path.exists(old_music_folder):
         if type == 'normal':
             for file in os.listdir(old_music_folder):
@@ -109,60 +123,80 @@ def save_music_move(user_id, uuid, filename_display, type):
                 if file.endswith(".wav"):
                     shutil.move(old_file_path, new_file_path)
                     shutil.rmtree(old_music_folder)  # 移動完畢後刪除空資料夾
+
         elif type == 'drum':
             for file in os.listdir(old_music_folder):
-                if file.endswith(f"{uuid}_drummotif.wav"):
+                if file.endswith(f"{uuid}_short_drum.wav"):
                     old_file_path = os.path.join(old_music_folder, file)
-                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_drum_motif.wav")
-                elif file.endswith(f"{uuid}_drum.wav"):
+                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_short_drum.wav")
+                    if file.endswith(".wav"):
+                        shutil.move(old_file_path, new_file_path)
+                elif file.endswith(f"{uuid}_drum_auto.wav"):
                     old_file_path = os.path.join(old_music_folder, file)
-                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_drum.wav")
-                if file.endswith(".wav"):
-                    shutil.move(old_file_path, new_file_path)
+                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_drum_auto.wav")
+                    if file.endswith(".wav"):
+                        shutil.move(old_file_path, new_file_path)
+
+
         elif type == 'trio':
             for file in os.listdir(old_music_folder):
-                if file.endswith(f"{uuid}_triomotif.wav"):
+                if file.endswith(f"{uuid}_short_trio.wav"):
                     old_file_path = os.path.join(old_music_folder, file)
-                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_trio_motif.wav")
+                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_short_trio.wav")
 
-                elif file.endswith(f"{uuid}_trio.wav"):
+                    if file.endswith(".wav"):
+                        shutil.move(old_file_path, new_file_path)
+
+                elif file.endswith(f"{uuid}_trio_auto.wav"):
+                    old_file_path = os.path.join(old_music_folder, file)
+                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_trio_auto.wav")
+
+                    if file.endswith(".wav"):
+                        shutil.move(old_file_path, new_file_path)
+                
+
+        elif type == 'trio_manual':
+            for file in os.listdir(old_music_folder):
+                if file.endswith(f"{uuid}_trio.wav"):
                     old_file_path = os.path.join(old_music_folder, file)
                     new_file_path = os.path.join(new_music_folder, f"{filename_display}_trio.wav")
-                if file.endswith(".wav"):
-                    shutil.move(old_file_path, new_file_path)
 
-        
+                    if file.endswith(".wav"):
+                        shutil.move(old_file_path, new_file_path)
 
+        elif type == 'drum_manual':
+            for file in os.listdir(old_music_folder):
+                if file.endswith(f"{uuid}_drum.wav"):
+                    old_file_path = os.path.join(old_music_folder, file)
+                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_drum.wav")
 
+                    if file.endswith(".wav"):
+                        shutil.move(old_file_path, new_file_path)
 
             
     else:
         print(f"Error: {old_music_folder} does not exist.")
-        
-    
-    
-    
-
-    
 
     ### 處理 generated_midi 資料夾 ###
-    midi_folder = os.path.join(user_folder, 'generated_midi')
-    os.makedirs(midi_folder, exist_ok=True)
+    if type == 'normal':
+        midi_folder = os.path.join(user_folder, 'generated_midi')
+        os.makedirs(midi_folder, exist_ok=True)
 
-    old_midi_folder = os.path.join(user_folder, 'temp_midi', uuid)
-    new_midi_folder = os.path.join(midi_folder, filename_display)
-    os.makedirs(new_midi_folder, exist_ok=True)
+        old_midi_folder = os.path.join(user_folder, 'temp_midi', uuid)
+        new_midi_folder = os.path.join(midi_folder, filename_display)
+        os.makedirs(new_midi_folder, exist_ok=True)
 
-    if os.path.exists(old_midi_folder):
-        for file in os.listdir(old_midi_folder):
-            old_file_path = os.path.join(old_midi_folder, file)
-            substr = old_file_path.split('_')
-            new_file_path = os.path.join(new_midi_folder, f"{filename_display}_{substr[-1]}")
-            if file.endswith(".mid"):
-                shutil.move(old_file_path, new_file_path)
-        #shutil.rmtree(old_midi_folder)  # 移動完畢後刪除空資料夾
-    else:
-        print(f"Error: {old_midi_folder} does not exist.")
+        if os.path.exists(old_midi_folder):
+            for file in os.listdir(old_midi_folder):
+                old_file_path = os.path.join(old_midi_folder, file)
+                substr = old_file_path.split('_')
+                new_file_path = os.path.join(new_midi_folder, f"{filename_display}_{substr[-1]}")
+                if file.endswith(".mid"):
+                    shutil.move(old_file_path, new_file_path)
+            #shutil.rmtree(old_midi_folder)  # 移動完畢後刪除空資料夾
+        else:
+            print(f"Error: {old_midi_folder} does not exist.")
+
 
     current_datetime = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     music_table_data = {"filename": filename_display, "timestamp": datetime.datetime.now().timestamp(), 'time' : current_datetime}
