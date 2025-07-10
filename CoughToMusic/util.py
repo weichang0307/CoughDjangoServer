@@ -1,19 +1,47 @@
 import os
 from django.conf import settings
-from .lib import cough
+from .lib import cough, Fake_cough_filter, cough_cluster
 import wave
 import shutil
 import datetime
+import io
+import librosa
+import soundfile as sf
+import librosa
 from .table import update_music_table
+import numpy as np
 
 
 def save_pcm16_to_wav(filename, data, rate):
     """保存音頻數據到 WAV 文件。"""
-    with wave.open(filename, 'wb') as wf:
-        wf.setnchannels(1)  # 單聲道
-        wf.setsampwidth(2)  # 16-bit PCM
-        wf.setframerate(rate)
-        wf.writeframes(data)
+
+    try:
+        # 如果 data 是 numpy array (float32)，先轉 int16
+        if isinstance(data, np.ndarray):
+            if data.dtype == np.float32 or data.dtype == np.float64:
+                data = (data * 32767).astype(np.int16).tobytes()
+            elif data.dtype == np.int16:
+                data = data.tobytes()
+        with wave.open(filename, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(rate)
+            wf.writeframes(data)
+    except Exception as e:
+        print(f"Error saving wav: {e}")
+        raise
+
+def save_wav_with_resample(filename, data, target_rate=16000):
+    """自動偵測並轉換 sample rate，保存音頻數據到 WAV 文件。"""
+    try:
+        # 讀取 bytes 為 numpy array，sr=None 代表用原始 sample rate
+        y, sr = librosa.load(io.BytesIO(data), sr=None, mono=True)
+        if sr != target_rate:
+            y = librosa.resample(y, orig_sr=sr, target_sr=target_rate)
+        sf.write(filename, y, target_rate)
+    except Exception as e:
+        print(f"Error saving wav: {e}")
+        raise
 
   
 def generate_music(user_id, cough_path, filename, bass_music = "tuba", alto_music = "clarinet", high_music = "flute", sample_rate = 16000):
@@ -214,11 +242,23 @@ def init_user_folder(user_id):
     generate_drum = os.path.join(user_folder, 'generated_drum')
     generate_trio = os.path.join(user_folder, 'generated_trio')
     generate_midi_folder = os.path.join(user_folder, 'generated_midi')
+    COUGH_TEMPLATE_FOLDER = os.path.join(user_folder, 'cough_template')
+    os.makedirs(COUGH_TEMPLATE_FOLDER, exist_ok=True)
     os.makedirs(cough_folder, exist_ok=True)
     os.makedirs(generate_music_folder, exist_ok=True)
     os.makedirs(generate_midi_folder, exist_ok=True)
     os.makedirs(generate_drum, exist_ok=True)
     os.makedirs(generate_trio, exist_ok=True)
+
+
+def fake_cough_dist(cough_path, sample_rate=16000):
+    audio_data, sr = librosa.load(cough_path, sr=sample_rate)
+    result = Fake_cough_filter.detect_inhale(audio_data, sr)
+    return result
+
+def clustering(audio_path, sample_rate, all_cough_file_path, csv_file_path, template_path_dir):
+    cough_cluster.cluster_audio(audio_path, sample_rate, all_cough_file_path, csv_file_path, template_path_dir)
+    
     
 
     

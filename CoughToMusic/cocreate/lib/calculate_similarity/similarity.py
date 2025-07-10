@@ -13,7 +13,7 @@ def calculate_window_similarity(window1, window2, max_pitch_diff=36, max_transit
 
     max_note_density = max(window1['note_density'], window2['note_density'])
     note_density_similarity = min(window1['note_density'], window2['note_density']) / max_note_density if max_note_density > 0 else 1
-
+ 
     avg_dur1, avg_dur2 = window1['avg_duration'], window2['avg_duration']
     dur_denom = max(avg_dur1, avg_dur2)
     if dur_denom > 0:

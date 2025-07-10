@@ -36,7 +36,7 @@ class GenerateJob:
                 generate_path = generate_music(
                     self.data['user_id'],
                     self.data['cough_path'],
-                    self.data['uuid'],
+                    self.uuid,
                     self.data['bass'].lower(),
                     self.data['alto'].lower(),
                     self.data['high'].lower()
@@ -46,22 +46,16 @@ class GenerateJob:
 
             elif self.mode == 'trio':
                 user_id = self.data['user_id']
-                print(f"user_id: {user_id}")
                 cough_path = self.data['cough_path']
-                print(f"cough_path: {cough_path}")
-                uuid = self.data['uuid']
+                uuid = self.uuid
                 time_value = os.path.splitext(os.path.basename(cough_path))[0]
-                print(f"time_value: {time_value}")
                 user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_trio')
                 os.makedirs(user_tmp_folder, exist_ok=True)
                 
                 cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
-                print(f"cough_path: {cough_table_path}")
                 df = pd.read_csv(cough_table_path)
                 match = df[df['time'] == time_value]
                 pubCoughID = int(match.iloc[0]['pubCoughID'])
-                print(f"pubCoughID: {pubCoughID}")
-                print(f'user_tmp_folder: {user_tmp_folder}')
                 generate_path_triomotif = cough2midi(pubCoughID, 'string', user_tmp_folder, uuid, sample_rate=16000)
                 gen_trio_mid(pubCoughID)
                 generate_path_trio = gen_trio_trk(pubCoughID, 'string', user_tmp_folder, uuid, sample_rate=16000)
@@ -71,12 +65,11 @@ class GenerateJob:
                     'generate_path_triomotif': generate_path_triomotif,
                     'generate_path_trio': generate_path_trio
                 }
-                print(f'generate_path_triomotif: {generate_path_triomotif}')
 
             elif self.mode == 'drum':
                 user_id = self.data['user_id']
                 cough_path = self.data['cough_path']
-                uuid = self.data['uuid']
+                uuid = self.uuid
                 time_value = os.path.splitext(os.path.basename(cough_path))[0]
                 user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_drum')
                 os.makedirs(user_tmp_folder, exist_ok=True)
@@ -93,25 +86,20 @@ class GenerateJob:
                     'generate_path_drummotif': generate_path_drummotif,
                     'generate_path_drum': generate_path_drum
                 }
-                print(f'generate_path_drummotif: {generate_path_drummotif}')
 
             elif self.mode == 'trio_manual':
                 user_id = self.data['user_id']
-                print(f"user_id: {user_id}")
-                uuid = self.data['uuid']
+                uuid = self.uuid
                 # time_value = os.path.splitext(os.path.basename(cough_path))[0]
                 user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_manual_trio')
                 os.makedirs(user_tmp_folder, exist_ok=True)
                 # final_manual_dir = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_manual_trio')
                 # os.makedirs(final_manual_dir, exist_ok=True)
                 mid_dic = {'mel':[], 'acc':[], 'bass':[]}
-                print(f'coughlist: {self.coughlist}')
                 for cough_pth in self.coughlist:
                     cough2mid_manual(cough_pth, user_tmp_folder, mid_dic)
-                print(f'mid_dic: {mid_dic}')
                 
                 gen_trio_manual(user_tmp_folder, mid_dic, uuid)
-                print("Start gen_trio_trk_manual")
                 generated_manual_trio = gen_trio_trk_manual(user_tmp_folder,uuid, sample_rate=16000)
 
                 self.result = {
@@ -120,7 +108,7 @@ class GenerateJob:
             elif self.mode == 'drum_manual':
                 user_id = self.data['user_id']
                 cough_path = self.data['cough_path']
-                uuid = self.data['uuid']
+                uuid = self.uuid
                 time_value = os.path.splitext(os.path.basename(cough_path))[0]
                 user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_manual_drum')
                 os.makedirs(user_tmp_folder, exist_ok=True)
@@ -130,7 +118,6 @@ class GenerateJob:
                 self.result = {
                     'generated_manual_drum': generated_manual_drum
                 }
-                print(f'generated_manual_drum: {generated_manual_drum}')
             # 計算執行時長並更新狀態
             self.duration = round(time.time() - start_time, 2)
             self.status = 'completed'

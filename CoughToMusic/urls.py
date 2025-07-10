@@ -27,4 +27,6 @@ urlpatterns = [
     path('generate/', views.generate, name='generate'),
     path('generate_status_view/', views.generate_status_view, name='generate_status_view'),
     path('refresh_best_song/', views.refresh_best_song, name='refresh_best_song'),
+    path('set_template/', views.set_template, name='set_template'),
+    path('modify_clusterID/', views.modify_clusterID, name='modify_clusterID'),
 ]

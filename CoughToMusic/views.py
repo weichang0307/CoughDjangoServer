@@ -1,15 +1,20 @@
 import os
 from django.views.decorators.csrf import csrf_exempt
-from .util import save_pcm16_to_wav, init_user_folder, save_music_move
+from .util import save_pcm16_to_wav, init_user_folder, save_music_move, save_wav_with_resample, save_pcm16_to_wav, fake_cough_dist, clustering
 from .table import update_user_table, init_user_table, init_cough_table, update_cough_table, init_music_table, update_music_table
 from .co_create_utils import save_final_cocreate
 from .task import GenerateJob, task_progress
 from django.conf import settings
 from django.http import JsonResponse
-from django.http import FileResponse, Http404
+from django.http import Http404
+from django.http import HttpResponse
 import shutil
+import uuid as uuid_lib
 import pandas as pd
 import json
+from django.http import StreamingHttpResponse, Http404
+from wsgiref.util import FileWrapper
+import os
 import datetime
 from threading import Thread
 from queue import Queue
@@ -20,10 +25,8 @@ import wave
 from pathlib import Path
 
 USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicProficiency', 'isCoughPublish', 'userEmail','bestSong1','bestSong2','bestSong3','isSmoker']
-COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time', 'latitude', 'longitude']
+COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time', 'latitude', 'longitude', 'clusterID']
 MUSIC_TABLE_COLUMNS = ['filename', 'timestamp', 'time']
-
-
 
 generate_task_queue = Queue()
 processing_jobs = []  # 存放處理中的工作
@@ -59,60 +62,186 @@ Thread(target=generate_worker, daemon=True).start()
 #         time.sleep(2)
 
 # Thread(target=monitor_queue, args=(generate_task_queue,), daemon=True).start()
+@csrf_exempt
+def modify_clusterID(request):
+    if request.method == 'POST':
+        try:
+            metadata_dict = json.loads(request.body)
+            userid = metadata_dict.get('userId')
+            filename = metadata_dict.get('filename')
+            clusterID = metadata_dict.get('clusterID')
+
+            # 檢查必要的參數是否存在
+            if not userid or not filename or clusterID is None:
+                return JsonResponse({'error': 'Missing required parameters'}, status=400)
+
+            # 更新 clusterID
+            user_folder = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio')
+            cough_table_path = os.path.join(user_folder, 'cough_table.csv')
+
+            if not os.path.exists(cough_table_path):
+                return JsonResponse({'error': 'Cough table does not exist'}, status=404)
+
+            df = pd.read_csv(cough_table_path)
+            df.loc[df['time'] == filename, 'clusterID'] = clusterID
+            df.to_csv(cough_table_path, index=False)
+
+
+            return JsonResponse({'message': 'Cluster ID updated successfully'}, status=200)
+
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'error': str(e)}, status=500)
+    else:
+        return JsonResponse({'error': 'Invalid request method'}, status=405)
 
 
 @csrf_exempt
-def create_cough_audio(request):
+def set_template(request):
     if request.method == 'POST':
         try:
+            metadata_dict = json.loads(request.body)
+            userid = metadata_dict.get('userId')
+            template_path_dir = os.path.join(settings.MEDIA_ROOT, userid, 'cough_template')
+            os.makedirs(template_path_dir, exist_ok=True)
+
+                    # 設定樣本率
             sample_rate = 16000
-            metadata = request.POST.get('metadata')            
+
+            # 獲取並解析元數據
+            metadata = request.POST.get('metadata')
             metadata_dict = json.loads(metadata)
             userid = metadata_dict.get('userId')
             filename = metadata_dict.get('fileName')
-            latitude = metadata_dict.get('latitude')
-            longitude = metadata_dict.get('longitude')
-            time = filename
+        
+            # 設定文件名路徑
             filename = os.path.join('', filename + '.wav')
             if not isinstance(filename, str):
                 raise ValueError("Invalid filename format")
-            
-            audio_file = request.FILES.get('file')  # 獲取名為 'file' 的文件
+
+            # 讀取上傳的音頻文件
+            audio_file = request.FILES.get('file')
             audio_data = audio_file.read()
-            
+
+            # 創建用戶的文件路徑
             file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', filename)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            # 保存音頻檔案
             save_pcm16_to_wav(file_path, audio_data, sample_rate)
 
+            # 回應成功
+            return JsonResponse({'IsSaving':'true','message': 'Audio data received successfully.'}, status=200)
+
+
+        except Exception as e:
+            print("Error: ", e)
+            return JsonResponse({'IsSaving':'false',"error": str(e)}, status=500)
+    else:
+        return JsonResponse({'IsSaving':'false', 'error': 'Invalid request method'}, status=405)
+
+@csrf_exempt
+def create_cough_audio(request):
+    # 檢查請求方法
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid request method'}, status=400)
+    
+    try:
+        # 設定樣本率
+        sample_rate = 16000
+
+        # 獲取並解析元數據
+        metadata = request.POST.get('metadata')
+        metadata_dict = json.loads(metadata)
+        userid = metadata_dict.get('userId')
+        filename = metadata_dict.get('fileName')
+        latitude = metadata_dict.get('latitude')
+        longitude = metadata_dict.get('longitude')
+        time = filename
+        
+        # 設定文件名路徑
+        filename = os.path.join('', filename + '.wav')
+        if not isinstance(filename, str):
+            raise ValueError("Invalid filename format")
+
+        # 讀取上傳的音頻文件
+        audio_file = request.FILES.get('file')
+        audio_data = audio_file.read()
+
+        # 創建用戶的文件路徑
+        file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', filename)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        # 保存音頻檔案
+        save_pcm16_to_wav(file_path, audio_data, sample_rate)
+        #save_wav_with_resample(file_path, audio_data)
+
+        #辨別真假咳嗽
+        #result = fake_cough_dist(file_path)
+        result = True
+
+        # 如果是真咳嗽的話就正常存下來
+        if result:
+            # 更新用戶資料夾路徑及CSV檔案
             user_folder = os.path.join(settings.MEDIA_ROOT, userid)
             os.makedirs(user_folder, exist_ok=True)
             user_table_path = os.path.join(user_folder, f'{userid}.csv')
 
+            # 讀取並檢查咳嗽公開狀態
             df = pd.read_csv(user_table_path)
             isCoughPub = df.loc[0, 'isCoughPublish']
-            isCoughPub = True
+            isCoughPub = True  # 修改為 True，確保能夠上傳
 
+            # 預備處理公開咳嗽音頻
             file_count = -1
-
-            if isCoughPub:
+            if isCoughPub and result == True:
                 folder_path_public = os.path.join(settings.MEDIA_ROOT, 'public_cough')
-                # os.makedirs(folder_path_public, exist_ok=True)
-                existing_files= os.listdir(folder_path_public)
+                #    os.makedirs(folder_path_public, exist_ok=True)
+                existing_files = os.listdir(folder_path_public)
                 file_count = len(existing_files)
-                filename = f"{file_count + 1}.wav"  # 你可以根據需要調整檔案名稱格式
-                
+                filename = f"{file_count + 1}.wav"
+
+                # 保存公開的音頻文件
                 file_path_public = os.path.join(folder_path_public, filename)
                 save_pcm16_to_wav(file_path_public, audio_data, sample_rate)
+                #save_wav_with_resample(file_path, audio_data)
 
-            print('latitude: ', latitude)
-            print('longitude: ', longitude)
-            cough_table_data = {'filename': filename, 'timestamp': datetime.datetime.now().timestamp(), 'pubCoughID' : file_count+1, 'time' : time, 'latitude': latitude, 'longitude': longitude}
-            update_cough_table(userid, cough_table_data)
-            return JsonResponse({'message': 'Audio data received successfully.'}, status=200)
-        except Exception as e:
-            print("Error: ", e)
-            return JsonResponse({'error': str(e)}, status=400)
-    return JsonResponse({'error': 'Invalid request method'}, status=400)
+                cough_table_data = {
+                    'filename': filename,
+                    'timestamp': datetime.datetime.now().timestamp(),
+                    'pubCoughID': file_count + 1,
+                    'time': time,
+                    'latitude': latitude,
+                    'longitude': longitude,
+                    'clusterID': -1,  
+                }
+                update_cough_table(userid, cough_table_data)
+
+                # 對咳嗽進行分群
+                all_cough_file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio')
+                template_path_dir = os.path.join(settings.MEDIA_ROOT, userid, 'cough_template')
+                cough_csv_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', 'cough_table.csv')
+
+                # 音檔太短會報錯
+                clustering(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir)
+
+                # 回應成功
+                return JsonResponse({'IsSaving':'true','message': 'Audio data received successfully.'}, status=200)
+
+        else:
+            # 如果是假咳嗽，則不儲存音訊檔案
+            print("Fake cough detected, not saving the audio file.")
+            if os.path.exists(file_path):  # 檢查檔案是否存在
+                os.remove(file_path)  # 刪除檔案
+
+            return JsonResponse({'IsSaving':'false','message': 'Fake cough detected, not saving the audio file.'}, status=200)
+
+        
+
+    except Exception as e:
+        # 處理錯誤
+        print("Error: ", e)
+        return JsonResponse({'error': str(e)}, status=400)
 
 @csrf_exempt
 def get_coughs(request):
@@ -124,10 +253,14 @@ def get_coughs(request):
             userid = metadata_dict.get('userId')
             upload_folder = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio')
 
+            cough_table_path = os.path.join(upload_folder, 'cough_table.csv')
+            df = None
+            if os.path.exists(cough_table_path):
+                df = pd.read_csv(cough_table_path)
+
             for filename in os.listdir(upload_folder):
                 if filename.endswith('.wav'):  # 只處理 WAV 檔案
                     file_path = os.path.join(upload_folder, filename)
-                    # print("relative_path: ", file_path)
 
                     timestamp = os.path.getmtime(file_path)
                     formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
@@ -138,30 +271,70 @@ def get_coughs(request):
                         duration_seconds = frames / float(rate)
                         minutes, seconds = divmod(round(duration_seconds), 60)
                         duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
+
+                    # 取得對應 clusterID
+                    cluster_id = None
+                    if df is not None:
+                        base_name = filename.replace('.wav', '')
+                        match = df[df['time'] == base_name]
+                        if not match.empty:
+                            cluster_id = str(int(match.iloc[0]['clusterID']))
+                    
                     
                     # 建立音訊紀錄字典
                     audio_record = {
                         "filename": filename.replace('.wav', ''),
                         "filePath": file_path,
                         "timestamp": formatted_timestamp,
-                        "duration": duration
+                        "duration": duration,
+                        "clusterID": cluster_id 
                     }
                     audio_records.append(audio_record)
 
             return JsonResponse(audio_records, safe=False, status=200)
 
         except Exception as e:
+            print("Error: ", e)
             return JsonResponse({"error": str(e)}, status=500)
 
  
 def get_uploads_file(request, filename):
-    # 確保檔案存在
     filename = filename.replace('^', '/') 
     file_path = filename
-    if os.path.exists(file_path):
-        return FileResponse(open(file_path, 'rb'), as_attachment=True)
-    else:
+
+    if not os.path.exists(file_path):
         raise Http404("File not found")
+
+    file_size = os.path.getsize(file_path)
+    range_header = request.headers.get('Range', '')
+    content_type = 'application/octet-stream'
+
+    if range_header:
+        try:
+            range_val = range_header.strip().split('=')[1]
+            byte1, byte2 = range_val.split('-')
+            byte1 = int(byte1)
+            byte2 = int(byte2) if byte2 else file_size - 1
+        except:
+            return HttpResponse(status=400)
+
+        length = byte2 - byte1 + 1
+        f = open(file_path, 'rb')
+        f.seek(byte1)
+        response = StreamingHttpResponse(FileWrapper(f, blksize=8192), status=206, content_type=content_type)
+        response['Content-Length'] = str(length)
+        response['Content-Range'] = f'bytes {byte1}-{byte2}/{file_size}'
+        response['Accept-Ranges'] = 'bytes'
+        response['Content-Disposition'] = f'attachment; filename="{os.path.basename(file_path)}"'
+        return response
+
+    else:
+        f = open(file_path, 'rb')
+        response = StreamingHttpResponse(FileWrapper(f, blksize=8192), content_type=content_type)
+        response['Content-Length'] = str(file_size)
+        response['Accept-Ranges'] = 'bytes'
+        response['Content-Disposition'] = f'attachment; filename="{os.path.basename(file_path)}"'
+        return response
     
     
 @csrf_exempt
@@ -907,20 +1080,30 @@ def generate(request):
         coughlist_str = data.get('cough_path', None)
         coughlist_path = [p for p in (coughlist_str.split('^') if coughlist_str else []) if p]
         coughlist = [Path(p) for p in coughlist_path]
-        cough_length =len(coughlist_path)
-        # print("coughlist: ", coughlist)
-        # print("cough_length: ", cough_length)
+        cough_length = len(coughlist_path)
+
         if cough_length == 7:
-            mode  =  'drum_manual'
-        elif cough_length == 2 or cough_length == 3 or cough_length == 4:
+            mode = 'drum_manual'
+            print("[generate] mode set to drum_manual")
+        elif cough_length in (2, 3, 4):
             mode = 'trio_manual'
-        if not mode or not uuid:
-            return JsonResponse({'error': 'Missing mode or uuid'}, status=400)
+            print("[generate] mode set to trio_manual")
+        """
+        if not uuid or uuid == "":
+            uuid = str(uuid_lib.uuid4())"""
+        uuid = str(uuid_lib.uuid4())
+        print("[generate] uuid:", uuid)
         job = GenerateJob(mode, data, uuid, userId, coughlist)
+
         generate_task_queue.put(job)  # 將 job 放入 queue
+
         task_progress[uuid] = job  # 將 job 存入 task_progress
+
         return JsonResponse({'status': 'queued', 'uuid': uuid}, status=202)
     except Exception as e:
+        print("[generate] 發生例外:", e)
+        import traceback
+        traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
@@ -957,7 +1140,7 @@ def generate_status_view(request):
             'mode': job.mode,
             'time': job.time,
             'duration': job.duration,
-            'status': 'queued',
+            'status': job.status,
             'cough_path': job.data['cough_path'],
             'result': job.result
         }
@@ -970,7 +1153,7 @@ def generate_status_view(request):
             'mode': job.mode,
             'time': job.time,
             'duration': job.duration,
-            'status': 'processing',
+            'status': job.status,
             'result': job.result
         }
         for job in filter_by_user(processing_jobs)
@@ -982,13 +1165,11 @@ def generate_status_view(request):
             'mode': job.mode,
             'time': job.time,
             'duration': job.duration,
-            'status': 'completed',
+            'status': job.status,
             'result': job.result
         }
         for job in filter_by_user(completed_jobs)
     ]
 
     all_jobs = queued_jobs + processing_jobs_status + completed_jobs_status
-    return JsonResponse({
-        'queue': all_jobs
-    }, status=200)
+    return JsonResponse(all_jobs, safe=False, status=200)
