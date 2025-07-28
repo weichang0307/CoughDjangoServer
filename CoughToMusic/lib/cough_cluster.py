@@ -64,14 +64,12 @@ def detect_onsets(audio_data, sr, threshold=0.2, top_k=3):
         return []
     energies = [np.sum(audio_data[int(t * sr):int(t * sr) + int(0.2 * sr)] ** 2) for t in onset_times]
     top_indices = np.argsort(energies)[::-1][:top_k]
-    return [min([onset_times[i] for i in top_indices])]
+    return [min([onset_times[ i] for i in top_indices])]
 
 
 def extract_feature_from_audio(audio_data, sr):
     if len(audio_data) < int(WINDOW_DURATION * sr):
-        # 音檔太短，無法提取特徵
         return None
-
     y = noisereduce.reduce_noise(y=audio_data, sr=sr)
     y = np.nan_to_num(y)
     onsets = detect_onsets(y, sr, threshold=ONSET_THRESHOLD, top_k=TOP_K_ONSETS)
@@ -84,6 +82,7 @@ def extract_feature_from_audio(audio_data, sr):
         if len(window) < int(WINDOW_DURATION * sr):
             continue
         mels = waveform_to_examples(window, sr)
+        mels = mels.astype(np.float32)  # <--- 強制 float32
         preds = yamnet_model(mels)
         embeddings.append(tf.reduce_mean(preds, axis=0).numpy())
     return np.mean(embeddings, axis=0) if embeddings else None
@@ -128,62 +127,36 @@ def cluster_audio(audio_path, sample_rate, all_cough_file_path, csv_file_path, t
     user_cough_list = []
     clusters = {}
 
+
     if os.path.exists(csv_file_path):
         df = pd.read_csv(csv_file_path)
         for index, row in df.iterrows():
             # 如果 clusterID 是 "1"
-            if str(row["clusterID"]) == "1":
+            if str(row["clusterID"]) == "0":
                 # 取得 time 欄位並加上 .wav
                 filename = f"{row['time']}.wav"
                 filepath = os.path.join(all_cough_file_path, filename)
                 user_cough_list.append(filepath)
 
-            if os.path.exists(filepath):
-                if str(row["clusterID"]) == "0":
-                    user_cough_list.append(filepath)
-                else:
-                    # 非使用者群，加入 clusters
-                    cid = int(row["clusterID"])
-                try:
-                    y, sr = librosa.load(audio_path, sr=sample_rate)
-
-                    if np.allclose(y, 0):
-                        raise ValueError("音檔內容全為 0，無法提取特徵")
-                    
-                    if len(y) < int(0.96 * sr):
-                        raise ValueError("音檔長度不足 0.96 秒，無法提取特徵")
-
-                    if len(y) < int(WINDOW_DURATION * sample_rate):
-                        raise ValueError("音檔長度不足，無法提取特徵")
-                    
-                    target_feature = extract_feature_from_audio(y, sample_rate)
-                    
-                    if target_feature is None:
-                        raise ValueError("無法從音訊中提取有效特徵")
-                except Exception as e:
-                    raise ValueError(f"處理音訊檔案 {audio_path} 時發生錯誤: {e}")
     else:
         print(f"CSV 檔案 {csv_file_path} 不存在")
         return
-        
+
 
     # === 讀取 template 音檔並提取特徵 ===
     template_features = []
     for file in os.listdir(template_path_dir):
         if file.endswith(".wav"):
             path = os.path.join(template_path_dir, file)
-            print(f"處理模板音檔: {path}")
             y, _ = librosa.load(path, sr=sample_rate)
             feat = extract_feature_from_audio(y, sample_rate)
             if feat is not None:
                 template_features.append(feat)
 
-
     # === 使用者咳嗽音檔提取特徵 ===
     user_features = []
     for filepath in user_cough_list:
         y, _ = librosa.load(filepath, sr=sample_rate)
-        print(f"處理音檔: {filepath}")
         feat = extract_feature_from_audio(y, sample_rate)
         if feat is not None:
             user_features.append(feat)
@@ -191,6 +164,8 @@ def cluster_audio(audio_path, sample_rate, all_cough_file_path, csv_file_path, t
     # === 動態個人中心 ===
     all_features = template_features + user_features
     personal_center = np.mean(all_features, axis=0) if all_features else None
+
+
 
     # === 擷取新音檔的特徵 ===
     try:
@@ -200,6 +175,8 @@ def cluster_audio(audio_path, sample_rate, all_cough_file_path, csv_file_path, t
             raise ValueError("無法從音訊中提取有效特徵")
     except Exception as e:
         raise ValueError(f"處理音訊檔案 {audio_path} 時發生錯誤: {e}")
+    
+
 
     # === 分群管理器建立與分群 ===
     cluster_manager = CoughClusterManager(
@@ -210,8 +187,10 @@ def cluster_audio(audio_path, sample_rate, all_cough_file_path, csv_file_path, t
         metric=DISTANCE_METRIC
     )
 
+
     assigned_cluster = cluster_manager.assign_cluster(target_feature)
 
+    """
     # === 寫入新記錄到 CSV ===
     
     if os.path.exists(csv_file_path):
@@ -227,9 +206,10 @@ def cluster_audio(audio_path, sample_rate, all_cough_file_path, csv_file_path, t
             print(f"找不到對應 audio_path={audio_name} 的列")
 
         # ✅ 存回 CSV
-        df.to_csv(csv_file_path, index=False)
+        df.to_csv(csv_file_path, index=False)"""
     
-    return
+    
+    return str(assigned_cluster)
 
     
 

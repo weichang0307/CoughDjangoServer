@@ -46,47 +46,87 @@ def visualize_cough(audio_data, sr, file_index, onset_times, offset_times, durat
     plt.tight_layout()
     plt.show()
 
-def process_all_coughs(folder_path):
-    all_files = [f for f in os.listdir(folder_path) if f.endswith(".wav")]
-    data = []
+# def process_all_coughs(user_path, public_folder, sample_size=30, seed=42):
+#     # 先處理使用者咳嗽
+#     user_data = []
+#     file_name = os.path.splitext(os.path.basename(user_path))[0]
+#     audio_data, sr = audio.load_from_file(user_path)
+#     onset_times = detect(audio_data, sr)
+#     onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
+#     durations = compute_durations(onset_times, offset_times)
+#     if len(durations) == 0:
+#         raise ValueError("User cough has no valid durations.")
+#     avg_duration = np.mean(durations)
+#     loudness_values = [compute_loudness(audio_data[int(start * sr):int(end * sr)]) 
+#                        for start, end in zip(onset_times, offset_times)]
+#     avg_loudness = np.mean(loudness_values) if loudness_values else 0.0001
+#     user_data.append([file_name, avg_duration, avg_loudness])
 
-    for file in all_files:
-        file_index = file.split("_")[-1].split(".")[0]
-        audio_path = os.path.join(folder_path, file)
-        audio_data, sr = audio.load_from_file(audio_path)
+#     # 再從 public 抽樣
+#     public_files = [f for f in os.listdir(public_folder) if f.endswith(".wav")]
+#     public_files = [f for f in public_files if os.path.splitext(f)[0] != file_name]
+#     random.seed(seed)
+#     sampled_files = random.sample(public_files, sample_size)
 
-        onset_times = detect(audio_data, sr)
-        onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
-        durations = compute_durations(onset_times, offset_times)
+#     public_data = []
+#     for file in sampled_files:
+#         file_index = os.path.splitext(file)[0]
+#         audio_path = os.path.join(public_folder, file)
+#         audio_data, sr = audio.load_from_file(audio_path)
+#         onset_times = detect(audio_data, sr)
+#         onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
+#         durations = compute_durations(onset_times, offset_times)
+#         if len(durations) == 0:
+#             continue
+#         avg_duration = np.mean(durations)
+#         loudness_values = [compute_loudness(audio_data[int(start * sr):int(end * sr)]) 
+#                            for start, end in zip(onset_times, offset_times)]
+#         avg_loudness = np.mean(loudness_values) if loudness_values else 0.0001
+#         public_data.append([file_index, avg_duration, avg_loudness])
 
-        avg_duration = np.mean(durations)
-        loudness_values = [compute_loudness(audio_data[int(start * sr):int(end * sr)]) 
-                           for start, end in zip(onset_times, offset_times)]
-        avg_loudness = np.mean(loudness_values)
+#     full_data = user_data + public_data
+#     df = pd.DataFrame(full_data, columns=["id", "avg_duration", "avg_loudness"])
+#     return df
 
-        data.append([file_index, avg_duration, avg_loudness])
-        # visualize_cough(audio_data, sr, file_index, onset_times, offset_times, durations)
 
-    return pd.DataFrame(data, columns=["id", "avg_duration", "avg_loudness"])
 
 def normalize_and_rank(df):
     df["duration_percentile"] = df["avg_duration"].rank(pct=True)
     df["loudness_percentile"] = df["avg_loudness"].rank(pct=True)
     return df
 
+# def classify(duration_pct, loudness_pct):
+#     if duration_pct <= 0.4:
+#         return "closed_hihat" if loudness_pct <= 0.25 else "kick" if loudness_pct <= 0.6 else "snare"
+#     elif duration_pct <= 0.9:
+#         return "open_hihat" if loudness_pct <= 0.3 else "low_tom" if loudness_pct <= 0.66 else "mid_tom"
+#     return "open_hihat" if loudness_pct <= 0.6 else "crash"
+
 def classify(duration_pct, loudness_pct):
-    if duration_pct <= 0.4:
-        return "closed_hihat" if loudness_pct <= 0.25 else "kick" if loudness_pct <= 0.6 else "snare"
-    elif duration_pct <= 0.9:
-        return "open_hihat" if loudness_pct <= 0.3 else "low_tom" if loudness_pct <= 0.66 else "mid_tom"
-    return "open_hihat" if loudness_pct <= 0.6 else "crash"
+    # 3x3 grid：每格對應一個鼓種
+    if duration_pct <= 0.33:
+        if loudness_pct <= 0.33:
+            return "closed_hihat"
+        elif loudness_pct <= 0.66:
+            return "kick"
+        else:
+            return "snare"
+    elif duration_pct <= 0.66:
+        if loudness_pct <= 0.33:
+            return "open_hihat"
+        elif loudness_pct <= 0.66:
+            return "low_tom"
+        else:
+            return "mid_tom"
+    else:
+        return "crash"
 
 def classify_coughs(df):
     df["drum"] = df.apply(lambda row: classify(row["duration_percentile"], row["loudness_percentile"]), axis=1)
     print(df)
     return df
 
-def select_related_drums(df, target_id, num ):
+def select_related_drums(df, target_id, num):
     if "drum" not in df.columns:
         raise ValueError("Missing 'drum' column.")
 
@@ -104,6 +144,29 @@ def select_related_drums(df, target_id, num ):
         if row["drum"] not in selected_coughs:
             selected_coughs[row["drum"]] = row["id"]       
     return selected_coughs
+
+def process_autofill_coughs(user_paths, public_folder, total_needed=7, seed=42):
+    # 確保補足夠的 public coughs
+    public_files = [f for f in os.listdir(public_folder) if f.endswith('.wav')]
+    public_needed = total_needed - len(user_paths)
+
+    if public_needed > len(public_files):
+        raise ValueError("Not enough public coughs available.")
+
+    sampled_files = random.sample(public_files, public_needed)
+    public_paths = [os.path.join(public_folder, f) for f in sampled_files]
+
+    full_cough_list = user_paths + public_paths
+
+    # 使用 manual cough 處理流程
+    selected_coughs, df = process_manual_coughs(full_cough_list, seed=seed)
+
+    # 回傳路徑對照表
+    id_to_path = {os.path.splitext(os.path.basename(p))[0]: p for p in full_cough_list}
+
+    return selected_coughs, df, id_to_path, public_paths
+
+
 
 # def write_midi_pretty(selected_coughs, df, folder_path, output_midi):
 #     midi = pretty_midi.PrettyMIDI()
@@ -305,6 +368,7 @@ def write_midi_pretty_manual(selected_coughs, df, cough_path_list, output_midi, 
 
 ALL_DRUMS = ['kick', 'snare', 'closed_hihat', 'open_hihat', 'mid_tom', 'low_tom', 'crash']
 
+
 def process_manual_coughs(cough_path_list, seed=42):
     data = []
     for path in cough_path_list:
@@ -314,36 +378,41 @@ def process_manual_coughs(cough_path_list, seed=42):
         onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
         durations = compute_durations(onset_times, offset_times)
         avg_duration = np.mean(durations)
+        if len(durations) == 0:
+            print(f"[警告] 無有效 duration: {file_name}")
+            continue
         loudness_values = [compute_loudness(audio_data[int(start * sr):int(end * sr)]) 
                            for start, end in zip(onset_times, offset_times)]
-        avg_loudness = np.mean(loudness_values)
+        if loudness_values:
+            avg_loudness = np.mean(loudness_values)
+        else:
+            avg_loudness = 0.0001  # 或者你要跳過這個咳嗽段
         data.append([file_name, avg_duration, avg_loudness])
 
     df = pd.DataFrame(data, columns=["name", "avg_duration", "avg_loudness"])
     df = normalize_and_rank(df)
     df = classify_coughs(df)
 
-    # group by drum type
-    drum_groups = df.groupby("drum")
+    # 初始化：只保留第一個出現的鼓種，其餘先不分配
+    used_drums = set()
     selected_coughs = {}
+    unassigned_rows = []
 
-    for drum, group in drum_groups:
-        selected_row = group.sample(n=1, random_state=seed)
-        selected_coughs[drum] = selected_row["name"].values[0]
+    for _, row in df.iterrows():
+        drum = row["drum"]
+        name = row["name"]
+        if drum not in used_drums:
+            selected_coughs[drum] = name
+            used_drums.add(drum)
+        else:
+            unassigned_rows.append(name)
 
-    # handle missing drums
-    assigned_ids = set(selected_coughs.values())
-    remaining = df[~df["name"].isin(assigned_ids)]
-
-    for drum in ALL_DRUMS:
-        if drum not in selected_coughs:
-            if not remaining.empty:
-                random_row = remaining.sample(n=1, random_state=seed)
-                selected_coughs[drum] = random_row["name"].values[0]
-                remaining = remaining[remaining["name"] != random_row["name"].values[0]]
-            else:
-                # fallback if not enough unique coughs
-                random_existing = random.choice(list(assigned_ids))
-                selected_coughs[drum] = random_existing
-
+    # 把未用到的鼓種，指派給 unassigned 的咳嗽
+    remaining_drums = [d for d in ALL_DRUMS if d not in used_drums]
+    random.seed(seed)
+    for name, drum in zip(unassigned_rows, remaining_drums):
+        selected_coughs[drum] = name
+        df.loc[df["name"] == name, "drum"] = drum
+        df = df.sort_values("drum")
+    print(f'df:\n{df}')
     return selected_coughs, df

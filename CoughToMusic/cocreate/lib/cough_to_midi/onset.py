@@ -5,15 +5,27 @@ def normalization(data):
     _range = np.max(data) - np.min(data)
     return (data - np.min(data)) / _range
 
-def detect(audio_data , sr):
+def detect(audio_data, sr, initial_threshold=0.2, min_threshold=0.05, step=0.05):
     onset_env = librosa.onset.onset_strength(y=audio_data, sr=sr)
     onset_env = normalization(onset_env)
-    # threshold = np.percentile(onset_env, 90) 
-    onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
-    onset_frames = [frame for frame in onset_frames if onset_env[frame] > 0.2]
+
+    threshold = initial_threshold
+    onset_frames = []
+
+    # 嘗試遞減 threshold 直到有偵測到或達最低
+    while threshold >= min_threshold and not onset_frames:
+        onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
+        onset_frames = [frame for frame in onset_frames if onset_env[frame] > threshold]
+        if not onset_frames:
+            threshold -= step
+
+    if not onset_frames:
+        return np.array([])  # 確保回傳型別一致
+
     onset_times = librosa.frames_to_time(onset_frames, sr=sr)
     onset_times = merge_onset(onset_times, 0.05)
     return onset_times
+
 
 def merge_onset(onset_times, min_time_gap):
     if len(onset_times) > 0:

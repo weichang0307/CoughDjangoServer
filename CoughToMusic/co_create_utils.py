@@ -47,13 +47,13 @@ BASS_CONFIG = {
 }
 instruments = {'mel': 40, 'acc': 41, 'bass': 43}
 
-def sound_synthesis(Db, Room_size, Damping, Wet_level, synthesized_audio, sample_rate):
-    board = Pedalboard([
-        Gain(gain_db=Db),
-        Reverb(room_size=Room_size, damping=Damping, wet_level=Wet_level),
-    ])
-    processed_audio = board(synthesized_audio, sample_rate)
-    return processed_audio
+# def sound_synthesis(Db, Room_size, Damping, Wet_level, synthesized_audio, sample_rate):
+#     board = Pedalboard([
+#         Gain(gain_db=Db),
+#         Reverb(room_size=Room_size, damping=Damping, wet_level=Wet_level),
+#     ])
+#     processed_audio = board(synthesized_audio, sample_rate)
+#     return processed_audio
 
 def get_instrument_settings(track, inst):
     settings = {
@@ -193,6 +193,9 @@ def gen_trio_mid(id):
         sequence_pth =[id_to_pth(id, trk, 'mtf') for id in sequence]
         intrp_mid_pth = id_to_pth(id, trk, 'mid')
         generate_melody_from_sequence(sequence_pth, intrp_mid_pth)
+    used_cough_paths = [os.path.join(settings.PUBLIC_COUGH, f"{i}.wav") for i in sequence]
+
+    return used_cough_paths
         # if trk != 'mel':
             # ref_pth = id_to_pth(id, 'mel', 'mid')
             # print(f"Correcting key for {ref_pth, intrp_mid_pth}")
@@ -230,7 +233,7 @@ def gen_trio_trk_manual(user_folder, uuid, sample_rate=16000):
 
        
 def gen_trio_trk(id, inst, user_folder,uuid, sample_rate=16000):
-    merged_output_path = os.path.join(user_folder,  f'{uuid}_trio_auto.wav')
+    merged_output_path = os.path.join(user_folder,  f'{uuid}_trio.wav')
     wav_paths, audio = {}, {}
     midi_paths = {
         'mel': id_to_pth(id, 'mel', 'mid'),
@@ -262,51 +265,54 @@ def gen_trio_trk(id, inst, user_folder,uuid, sample_rate=16000):
     # generate_trio(inst, midi_paths, wav_paths, merged_output_path, sample_rate)
     # return merged_output_path
 
-def generate_groove_intp(folder_path, target_id, user_folder, uuid):
-    drum_mid = id_to_pth(target_id, 'drum', 'mid') 
-    # drum_trk = os.path.join(user_folder, f'cocreate_{uuid}_drum.wav')
-    drum_trk = os.path.join(user_folder, f'{uuid}_drum_auto.wav')
-    drum_motif_trk =os.path.join(user_folder, f'{uuid}_short_drum.wav')
+# def generate_groove_intp(folder_path, target_id, user_folder, uuid):
+#     drum_mid = id_to_pth(target_id, 'drum', 'mid') 
+#     # drum_trk = os.path.join(user_folder, f'cocreate_{uuid}_drum.wav')
+#     drum_trk = os.path.join(user_folder, f'{uuid}_drum.wav')
+#     drum_motif_trk =os.path.join(user_folder, f'{uuid}_drum.wav')
+#     print(f"Generating drum motif for ID: {target_id} at {drum_mid}")
 
-    df = classify_coughs(normalize_and_rank(process_all_coughs(folder_path)))
-    cough7 = select_related_drums(df, target_id, 7)
-    tmp_first = 'tmp/first.mid'
-    tmp_sec = 'tmp/sec.mid'
-    tmp_third = 'tmp/third.mid'
-    tmp_last = 'tmp/last.mid'
-    tmp_last2 = 'tmp/last2.mid'
-    def save_midi(neg_offset, path):
-        subset = dict(list(cough7.items())[:neg_offset])
-        write_midi_pretty(subset, df, folder_path, path)
-        midi.adjust_to_2bars(path, path)
-        return path
+#     df = classify_coughs(normalize_and_rank(process_all_coughs(folder_path)))
+#     print(f"Dataframe shape: {df.shape}")
 
-    tmp_first = save_midi(-6, tmp_first)
-    tmp_sec = save_midi(-5, tmp_sec)  
-    tmp_third = save_midi(-4, tmp_third)       
-    tmp_last = save_midi(None, tmp_last)  
-    midi.write_from_midi(tmp_first, drum_motif_trk)
+#     cough7 = select_related_drums(df, target_id, 7)
+#     tmp_first = 'tmp/first.mid'
+#     tmp_sec = 'tmp/sec.mid'
+#     tmp_third = 'tmp/third.mid'
+#     tmp_last = 'tmp/last.mid'
+#     tmp_last2 = 'tmp/last2.mid'
+#     def save_midi(neg_offset, path):
+#         subset = dict(list(cough7.items())[:neg_offset])
+#         write_midi_pretty(subset, df, folder_path, path)
+#         midi.adjust_to_2bars(path, path)
+#         return path
 
-    midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
-    midi.snap_on_grid_noteseq(tmp_sec, tmp_sec, 32)
-    midi.snap_on_grid_noteseq(tmp_third, tmp_third, 16)
-    midi.snap_on_grid_noteseq(tmp_last, tmp_last, 16)
-    midi.concatenate([tmp_sec, tmp_third], tmp_third, sec = 4.0)
-    midi.concatenate([tmp_last, tmp_last], tmp_last2, sec = 4.0)
+#     tmp_first = save_midi(-6, tmp_first)
+#     tmp_sec = save_midi(-5, tmp_sec)  
+#     tmp_third = save_midi(-4, tmp_third)       
+#     tmp_last = save_midi(None, tmp_last)  
+#     midi.write_from_midi(tmp_first, drum_motif_trk)
 
-    interpolated_seq = interpolated_groove(tmp_third, tmp_last2, drum_mid)
+#     midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
+#     midi.snap_on_grid_noteseq(tmp_sec, tmp_sec, 32)
+#     midi.snap_on_grid_noteseq(tmp_third, tmp_third, 16)
+#     midi.snap_on_grid_noteseq(tmp_last, tmp_last, 16)
+#     midi.concatenate([tmp_sec, tmp_third], tmp_third, sec = 4.0)
+#     midi.concatenate([tmp_last, tmp_last], tmp_last2, sec = 4.0)
+
+#     interpolated_seq = interpolated_groove(tmp_third, tmp_last2, drum_mid)
     
-    start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
-    concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, drum_mid,  target_duration=8.0)
-    concatenate_sequences(tmp_first, drum_mid, drum_mid)
-    midi.write_from_midi(drum_mid, drum_trk)
-    print(f"Drum motif generation to {drum_mid} completed.")
-    return drum_motif_trk, drum_trk
+#     start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
+#     concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, drum_mid,  target_duration=8.0)
+#     concatenate_sequences(tmp_first, drum_mid, drum_mid)
+#     midi.write_from_midi(drum_mid, drum_trk)
+#     print(f"Drum motif generation to {drum_mid} completed.")
+#     return drum_trk, [os.path.join(folder_path, f"{id}.wav") for id in list(cough7.keys()) if id != target_id]
+
 
 def generate_groove_intp_manual(cough_path_list, user_folder, uuid):
     assert len(cough_path_list) == 7, "Expecting exactly 7 cough files"
     drum_trk = os.path.join(user_folder, f'{uuid}_drum.wav')
-
     selected_coughs, df = process_manual_coughs(cough_path_list)
     print(f"Selected coughs: {selected_coughs}")
 
@@ -344,6 +350,49 @@ def generate_groove_intp_manual(cough_path_list, user_folder, uuid):
 
     print(f"Manual drum groove generated at {drum_trk}")
     return drum_trk
+
+
+def generate_groove_intp_autofill(user_paths, public_folder, user_folder, uuid):
+
+    selected_coughs, df, id_to_path, used_public_paths = process_autofill_coughs(user_paths, public_folder)
+
+    tmp_first = 'tmp/first.mid'
+    tmp_sec = 'tmp/sec.mid'
+    tmp_third = 'tmp/third.mid'
+    tmp_last = 'tmp/last.mid'
+    tmp_last2 = 'tmp/last2.mid'
+    drum_trk = os.path.join(user_folder, f'{uuid}_drum.wav')
+    drum_motif_trk = os.path.join(user_folder, f'{uuid}_short_drum.wav')
+
+    cough_seq = list(selected_coughs.items())
+
+    def save_midi(seq_slice, out_path):
+        subset = dict(cough_seq[seq_slice])
+        write_midi_pretty_manual(subset, df, list(id_to_path.values()), out_path)
+        midi.adjust_to_2bars(out_path, out_path)
+        return out_path
+
+    tmp_first = save_midi(slice(0, 1), tmp_first)
+    tmp_sec = save_midi(slice(0, 2), tmp_sec)
+    tmp_third = save_midi(slice(0, 3), tmp_third)
+    tmp_last = save_midi(slice(0, 7), tmp_last)
+
+    midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
+    midi.snap_on_grid_noteseq(tmp_sec, tmp_sec, 32)
+    midi.snap_on_grid_noteseq(tmp_third, tmp_third, 16)
+    midi.snap_on_grid_noteseq(tmp_last, tmp_last, 16)
+
+    midi.concatenate([tmp_sec, tmp_third], tmp_third, sec=4.0)
+    midi.concatenate([tmp_last, tmp_last], tmp_last2, sec=4.0)
+
+    interpolated_seq = interpolated_groove(tmp_third, tmp_last2, tmp_last)
+    start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
+    concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, tmp_last, target_duration=8.0)
+    concatenate_sequences(tmp_first, tmp_last, tmp_last)
+    midi.write_from_midi(tmp_last, drum_trk)
+    used_paths = [id_to_path[cid] for cid in selected_coughs.values() if cid in df["name"].values]
+
+    return drum_trk, used_paths
 
 
 # def batch_update_midi_programs(directory, program_number, channel=0):
@@ -417,10 +466,10 @@ def save_final_cocreate(user_id, uuid, filename_display):
                 drum_file_path = os.path.join(tmp_dir, file)
                 print(f"Drum motif file path: {drum_file_path}")
                 new_drum_file_path = os.path.join(new_music_folder, f"{filename_display}_short_drum.wav")
-            elif file.endswith("_trio_auto.wav"):
+            elif file.endswith("_trio.wav"):
                 trio_file_path = os.path.join(tmp_dir, file)
                 print(f"Trio file path: {trio_file_path}")
-                new_trio_file_path = os.path.join(new_music_folder, f"{filename_display}_trio_auto.wav")
+                new_trio_file_path = os.path.join(new_music_folder, f"{filename_display}_trio.wav")
                 shutil.move(trio_file_path, new_trio_file_path)
             
         shutil.rmtree(tmp_dir)  
@@ -508,3 +557,4 @@ def save_final_cocreate(user_id, uuid, filename_display):
 # generate_path_triomotif = cough2midi(15, 'string', './media/jag22325477@gapp.nthu.edu.tw/temp_trio', 'u256uid', sample_rate=16000)
 # gen_trio_mid(15)
 # generate_path_trio = gen_trio_trk(15, 'string', './media/jag22325477@gapp.nthu.edu.tw/temp_trio', 'u256uid', sample_rate=16000)
+

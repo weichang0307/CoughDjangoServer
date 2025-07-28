@@ -1,6 +1,6 @@
 import os
 from django.conf import settings
-from .lib import cough, Fake_cough_filter, cough_cluster
+from .lib import cough, Fake_cough_filter, cough_cluster, filter, classify_coughs
 import wave
 import shutil
 import datetime
@@ -113,13 +113,13 @@ def save_music_move(user_id, uuid, filename_display, type):
         new_music_folder = os.path.join(trio_new_fp, filename_display)
         os.makedirs(new_music_folder, exist_ok=True)
         #togo
-    elif type == 'drum':
-        drum_new_fp = os.path.join(user_folder, 'generated_drum')
-        #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
-        os.makedirs(drum_new_fp, exist_ok=True)
-        old_music_folder = os.path.join(user_folder, 'temp_drum')
-        new_music_folder = os.path.join(drum_new_fp, filename_display)
-        os.makedirs(new_music_folder, exist_ok=True)
+    # elif type == 'drum':
+    #     drum_new_fp = os.path.join(user_folder, 'generated_drum')
+    #     #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
+    #     os.makedirs(drum_new_fp, exist_ok=True)
+    #     old_music_folder = os.path.join(user_folder, 'temp_drum')
+    #     new_music_folder = os.path.join(drum_new_fp, filename_display)
+    #     os.makedirs(new_music_folder, exist_ok=True)
     elif type == 'trio_manual':
         drum_new_fp = os.path.join(user_folder, 'generated_manual_trio')
         #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
@@ -132,6 +132,13 @@ def save_music_move(user_id, uuid, filename_display, type):
         #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
         os.makedirs(drum_new_fp, exist_ok=True)
         old_music_folder = os.path.join(user_folder, 'temp_manual_drum')
+        new_music_folder = os.path.join(drum_new_fp, filename_display)
+        os.makedirs(new_music_folder, exist_ok=True)
+    elif type == 'drum':
+        drum_new_fp = os.path.join(user_folder, 'generated_autofill_drum')
+        #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
+        os.makedirs(drum_new_fp, exist_ok=True)
+        old_music_folder = os.path.join(user_folder, 'temp_autofill_drum')
         new_music_folder = os.path.join(drum_new_fp, filename_display)
         os.makedirs(new_music_folder, exist_ok=True)
         #togo
@@ -154,30 +161,30 @@ def save_music_move(user_id, uuid, filename_display, type):
 
         elif type == 'drum':
             for file in os.listdir(old_music_folder):
-                if file.endswith(f"{uuid}_short_drum.wav"):
+                # if file.endswith(f"{uuid}_short_drum.wav"):
+                #     old_file_path = os.path.join(old_music_folder, file)
+                #     new_file_path = os.path.join(new_music_folder, f"{filename_display}_short_drum.wav")
+                #     if file.endswith(".wav"):
+                #         shutil.move(old_file_path, new_file_path)
+                if file.endswith(f"{uuid}_drum.wav"):
                     old_file_path = os.path.join(old_music_folder, file)
-                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_short_drum.wav")
-                    if file.endswith(".wav"):
-                        shutil.move(old_file_path, new_file_path)
-                elif file.endswith(f"{uuid}_drum_auto.wav"):
-                    old_file_path = os.path.join(old_music_folder, file)
-                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_drum_auto.wav")
+                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_drum.wav")
                     if file.endswith(".wav"):
                         shutil.move(old_file_path, new_file_path)
 
 
         elif type == 'trio':
             for file in os.listdir(old_music_folder):
-                if file.endswith(f"{uuid}_short_trio.wav"):
-                    old_file_path = os.path.join(old_music_folder, file)
-                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_short_trio.wav")
+                # if file.endswith(f"{uuid}_short_trio.wav"):
+                #     old_file_path = os.path.join(old_music_folder, file)
+                #     new_file_path = os.path.join(new_music_folder, f"{filename_display}_short_trio.wav")
 
-                    if file.endswith(".wav"):
-                        shutil.move(old_file_path, new_file_path)
+                #     if file.endswith(".wav"):
+                #         shutil.move(old_file_path, new_file_path)
 
-                elif file.endswith(f"{uuid}_trio_auto.wav"):
+                if file.endswith(f"{uuid}_trio.wav"):
                     old_file_path = os.path.join(old_music_folder, file)
-                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_trio_auto.wav")
+                    new_file_path = os.path.join(new_music_folder, f"{filename_display}_trio.wav")
 
                     if file.endswith(".wav"):
                         shutil.move(old_file_path, new_file_path)
@@ -200,7 +207,14 @@ def save_music_move(user_id, uuid, filename_display, type):
 
                     if file.endswith(".wav"):
                         shutil.move(old_file_path, new_file_path)
+        # elif type == 'drum_autofill':
+        #     for file in os.listdir(old_music_folder):
+        #         if file.endswith(f"{uuid}_drum.wav"):
+        #             old_file_path = os.path.join(old_music_folder, file)
+        #             new_file_path = os.path.join(new_music_folder, f"{filename_display}_drum.wav")
 
+        #             if file.endswith(".wav"):
+        #                 shutil.move(old_file_path, new_file_path)
             
     else:
         print(f"Error: {old_music_folder} does not exist.")
@@ -257,8 +271,21 @@ def fake_cough_dist(cough_path, sample_rate=16000):
     return result
 
 def clustering(audio_path, sample_rate, all_cough_file_path, csv_file_path, template_path_dir):
-    cough_cluster.cluster_audio(audio_path, sample_rate, all_cough_file_path, csv_file_path, template_path_dir)
-    
-    
 
+    return cough_cluster.cluster_audio(audio_path, sample_rate, all_cough_file_path, csv_file_path, template_path_dir)
+
+def filter_coughs(audio_path):
+    filter.process_audio(audio_path)
+    
+    
+def classify_cough_event(cough_wav_path, user_data_path, template_data_path, strict_mode=True):
+    """
+    對咳嗽音頻進行分類，返回分類結果。
+    :param cough_wav_path: 咳嗽音頻的路徑
+    :param user_data_path: 使用者數據的路徑
+    :param template_data_path: 模板數據的路徑
+    :param strict_mode: 是否啟用嚴格模式
+    :return: 分類結果
+    """
+    return classify_coughs.classify_cough_file(cough_wav_path, user_data_path, template_data_path, strict_mode)
     

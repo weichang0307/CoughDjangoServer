@@ -1,6 +1,6 @@
 import os
 from django.views.decorators.csrf import csrf_exempt
-from .util import save_pcm16_to_wav, init_user_folder, save_music_move, save_wav_with_resample, save_pcm16_to_wav, fake_cough_dist, clustering
+from .util import save_pcm16_to_wav, init_user_folder, save_music_move, save_wav_with_resample, save_pcm16_to_wav, fake_cough_dist, clustering, filter_coughs, classify_cough_event
 from .table import update_user_table, init_user_table, init_cough_table, update_cough_table, init_music_table, update_music_table
 from .co_create_utils import save_final_cocreate
 from .task import GenerateJob, task_progress
@@ -9,7 +9,7 @@ from django.http import JsonResponse
 from django.http import Http404
 from django.http import HttpResponse
 import shutil
-import uuid as uuid_lib
+import uuid
 import pandas as pd
 import json
 from django.http import StreamingHttpResponse, Http404
@@ -19,13 +19,14 @@ import datetime
 from threading import Thread
 from queue import Queue
 import warnings
+import soundfile as sf
 
 warnings.filterwarnings("ignore", category=UserWarning, module="pyloudnorm")
 import wave
 from pathlib import Path
 
 USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicProficiency', 'isCoughPublish', 'userEmail','bestSong1','bestSong2','bestSong3','isSmoker']
-COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time', 'latitude', 'longitude', 'clusterID']
+COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time', 'latitude', 'longitude', 'clusterID', 'people']
 MUSIC_TABLE_COLUMNS = ['filename', 'timestamp', 'time']
 
 generate_task_queue = Queue()
@@ -98,50 +99,6 @@ def modify_clusterID(request):
 
 @csrf_exempt
 def set_template(request):
-    if request.method == 'POST':
-        try:
-            metadata_dict = json.loads(request.body)
-            userid = metadata_dict.get('userId')
-            template_path_dir = os.path.join(settings.MEDIA_ROOT, userid, 'cough_template')
-            os.makedirs(template_path_dir, exist_ok=True)
-
-                    # 設定樣本率
-            sample_rate = 16000
-
-            # 獲取並解析元數據
-            metadata = request.POST.get('metadata')
-            metadata_dict = json.loads(metadata)
-            userid = metadata_dict.get('userId')
-            filename = metadata_dict.get('fileName')
-        
-            # 設定文件名路徑
-            filename = os.path.join('', filename + '.wav')
-            if not isinstance(filename, str):
-                raise ValueError("Invalid filename format")
-
-            # 讀取上傳的音頻文件
-            audio_file = request.FILES.get('file')
-            audio_data = audio_file.read()
-
-            # 創建用戶的文件路徑
-            file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', filename)
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-            # 保存音頻檔案
-            save_pcm16_to_wav(file_path, audio_data, sample_rate)
-
-            # 回應成功
-            return JsonResponse({'IsSaving':'true','message': 'Audio data received successfully.'}, status=200)
-
-
-        except Exception as e:
-            print("Error: ", e)
-            return JsonResponse({'IsSaving':'false',"error": str(e)}, status=500)
-    else:
-        return JsonResponse({'IsSaving':'false', 'error': 'Invalid request method'}, status=405)
-
-@csrf_exempt
-def create_cough_audio(request):
     # 檢查請求方法
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid request method'}, status=400)
@@ -169,12 +126,64 @@ def create_cough_audio(request):
         audio_data = audio_file.read()
 
         # 創建用戶的文件路徑
+        file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_template', filename)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        # 保存音頻檔案
+        save_pcm16_to_wav(file_path, audio_data, sample_rate)
+        filter_coughs(file_path)
+        #save_wav_with_resample(file_path, audio_data)
+
+
+        return JsonResponse({'IsSaving': "true"}, status=200)
+
+        
+
+    except Exception as e:
+        # 處理錯誤
+        print("Error: ", e)
+        return JsonResponse({'error': str(e)}, status=400)
+
+@csrf_exempt
+def create_cough_audio(request):
+    # 檢查請求方法
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid request method'}, status=400)
+    
+    try:
+        # 設定樣本率
+        sample_rate = 16000
+
+        # 獲取並解析元數據
+        metadata = request.POST.get('metadata')
+        metadata_dict = json.loads(metadata)
+        userid = metadata_dict.get('userId')
+        filename = metadata_dict.get('fileName')
+        latitude = metadata_dict.get('latitude')
+        longitude = metadata_dict.get('longitude')
+        time = filename
+        
+        # 設定文件名路徑
+        filename = os.path.join('', filename + '.wav')
+        if not isinstance(filename, str):
+            raise ValueError("Invalid filename format")
+                # 對咳嗽進行分群
+        all_cough_file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio')
+        template_path_dir = os.path.join(settings.MEDIA_ROOT, userid, 'cough_template')
+        cough_csv_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', 'cough_table.csv')
+
+        # 讀取上傳的音頻文件
+        audio_file = request.FILES.get('file')
+        audio_data = audio_file.read()
+
+        # 創建用戶的文件路徑
         file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', filename)
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         # 保存音頻檔案
         save_pcm16_to_wav(file_path, audio_data, sample_rate)
-        #save_wav_with_resample(file_path, audio_data)
+        filter_coughs(file_path)
+        # save_wav_with_resample(file_path, audio_data)
 
         #辨別真假咳嗽
         #result = fake_cough_dist(file_path)
@@ -191,43 +200,59 @@ def create_cough_audio(request):
             df = pd.read_csv(user_table_path)
             isCoughPub = df.loc[0, 'isCoughPublish']
             isCoughPub = True  # 修改為 True，確保能夠上傳
+            classification_result = classify_cough_event(
+                cough_wav_path=file_path,
+                user_data_path=all_cough_file_path,
+                template_data_path=template_path_dir,
+                strict_mode=True
+            )
+
 
             # 預備處理公開咳嗽音頻
-            file_count = -1
-            if isCoughPub and result == True:
+
+            # 音檔太短會報錯
+            clusterid = clustering(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir)
+
+            has_non_user_cough = classification_result['has_non_user_cough']
+            has_user_cough = classification_result['has_user_cough']
+            if has_non_user_cough and  has_user_cough:
+            # 建立分離資料夾
+                splited_folder = os.path.join(settings.MEDIA_ROOT, userid, 'split_cough_audio')
+                os.makedirs(splited_folder, exist_ok=True)
+                splited_cough_folder = os.path.join(splited_folder, filename.replace('.wav', ''))
+                os.makedirs(splited_cough_folder, exist_ok=True)
+
+                sf.write(os.path.join(splited_cough_folder, filename.replace('.wav', '') + '_user.wav'), classification_result['user_output'], classification_result['sample_rate'])
+                sf.write(os.path.join(splited_cough_folder, filename.replace('.wav', '') + '_non_user.wav'), classification_result['non_user_output'], classification_result['sample_rate'])
+                
+            if isCoughPub and result == True and not has_non_user_cough:
                 folder_path_public = os.path.join(settings.MEDIA_ROOT, 'public_cough')
                 #    os.makedirs(folder_path_public, exist_ok=True)
                 existing_files = os.listdir(folder_path_public)
                 file_count = len(existing_files)
                 filename = f"{file_count + 1}.wav"
-
                 # 保存公開的音頻文件
                 file_path_public = os.path.join(folder_path_public, filename)
                 save_pcm16_to_wav(file_path_public, audio_data, sample_rate)
+                filter_coughs(file_path_public)
                 #save_wav_with_resample(file_path, audio_data)
 
-                cough_table_data = {
-                    'filename': filename,
-                    'timestamp': datetime.datetime.now().timestamp(),
-                    'pubCoughID': file_count + 1,
-                    'time': time,
-                    'latitude': latitude,
-                    'longitude': longitude,
-                    'clusterID': -1,  
-                }
-                update_cough_table(userid, cough_table_data)
-
-                # 對咳嗽進行分群
-                all_cough_file_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio')
-                template_path_dir = os.path.join(settings.MEDIA_ROOT, userid, 'cough_template')
-                cough_csv_path = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio', 'cough_table.csv')
-
-                # 音檔太短會報錯
-                clustering(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir)
-
                 # 回應成功
-                return JsonResponse({'IsSaving':'true','message': 'Audio data received successfully.'}, status=200)
+            
 
+            cough_table_data = {
+                'filename': filename,
+                'timestamp': datetime.datetime.now().timestamp(),
+                'pubCoughID': filename,
+                'time': time,
+                'latitude': latitude,
+                'longitude': longitude,
+                'clusterID': clusterid,  
+                'people' : has_non_user_cough and has_user_cough
+            }
+
+            update_cough_table(userid, cough_table_data)
+            return JsonResponse({'IsSaving':'true','message': 'Audio data received successfully.'}, status=200)
         else:
             # 如果是假咳嗽，則不儲存音訊檔案
             print("Fake cough detected, not saving the audio file.")
@@ -341,64 +366,72 @@ def get_uploads_file(request, filename):
 def get_music(request):
     if request.method == 'POST':
         try:
-            # 準備回傳的音訊資料
+            print("[get_music] 收到 POST 請求")
             audio_records = []
             metadata_dict = json.loads(request.body)
+            print("[get_music] metadata_dict:", metadata_dict)
             userid = metadata_dict.get('userId')
+            print("[get_music] userid:", userid)
             upload_folder_normal = os.path.join(settings.MEDIA_ROOT, userid, 'generated_music')
             upload_folder_trio = os.path.join(settings.MEDIA_ROOT, userid, 'generated_trio')
-            upload_folder_drum = os.path.join(settings.MEDIA_ROOT, userid, 'generated_drum')
+            upload_folder_drum = os.path.join(settings.MEDIA_ROOT, userid, 'generated_autofill_drum')
             upload_folder_drum_manual = os.path.join(settings.MEDIA_ROOT, userid, 'generated_manual_drum')
             upload_folder_trio_manual = os.path.join(settings.MEDIA_ROOT, userid, 'generated_manual_trio')
+            print("[get_music] 資料夾路徑:")
+            print("  normal:", upload_folder_normal)
+            print("  trio:", upload_folder_trio)
+            print("  drum:", upload_folder_drum)
+            print("  drum_manual:", upload_folder_drum_manual)
+            print("  trio_manual:", upload_folder_trio_manual)
             os.makedirs(upload_folder_normal, exist_ok=True)
             os.makedirs(upload_folder_trio, exist_ok=True)
             os.makedirs(upload_folder_drum, exist_ok=True)
             os.makedirs(upload_folder_drum_manual, exist_ok=True)
             os.makedirs(upload_folder_trio_manual, exist_ok=True)
             
-            
-            # 使用 os.walk() 遞迴遍歷資料夾
+            # 遍歷 normal
+            print("[get_music] 開始遍歷 normal 資料夾")
             for root, dirs, files in os.walk(upload_folder_normal):
+                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
-                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
-
+                    print(f"[get_music] 檢查檔案: {filename}")
+                    if filename.endswith('.wav'):
+                        file_path = os.path.join(root, filename)
+                        print(f"[get_music] 處理 normal 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                    
                         with wave.open(file_path, 'r') as wav_file:
                             frames = wav_file.getnframes()
                             rate = wav_file.getframerate()
                             duration_seconds = frames / float(rate)
                             minutes, seconds = divmod(round(duration_seconds), 60)
-                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
-                        
-                        # 建立音訊紀錄字典
+                            duration = f"{minutes:02}:{seconds:02}"
                         audio_record = {
                             "filename": filename.replace('.wav', ''),
                             "filePath": file_path,
                             "timestamp": formatted_timestamp,
                             "duration": duration,
-                            "type": "normal" 
+                            "type": "normal"
                         }
+                        print(f"[get_music] 加入 normal 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
-             # 使用 os.walk() 遞迴遍歷資料夾
+            # 遍歷 trio
+            print("[get_music] 開始遍歷 trio 資料夾")
             for root, dirs, files in os.walk(upload_folder_trio):
+                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
-                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
-
+                    print(f"[get_music] 檢查檔案: {filename}")
+                    if filename.endswith('.wav'):
+                        file_path = os.path.join(root, filename)
+                        print(f"[get_music] 處理 trio 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                    
                         with wave.open(file_path, 'r') as wav_file:
                             frames = wav_file.getnframes()
                             rate = wav_file.getframerate()
                             duration_seconds = frames / float(rate)
                             minutes, seconds = divmod(round(duration_seconds), 60)
-                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
-                        
-                        # 建立音訊紀錄字典
+                            duration = f"{minutes:02}:{seconds:02}"
                         audio_record = {
                             "filename": filename.replace('.wav', ''),
                             "filePath": file_path,
@@ -406,24 +439,23 @@ def get_music(request):
                             "duration": duration,
                             "type": "trio"
                         }
+                        print(f"[get_music] 加入 trio 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
-
             for root, dirs, files in os.walk(upload_folder_drum):
+                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
-                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
-
+                    print(f"[get_music] 檢查檔案: {filename}")
+                    if filename.endswith('.wav'):
+                        file_path = os.path.join(root, filename)
+                        print(f"[get_music] 處理 drum 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                    
                         with wave.open(file_path, 'r') as wav_file:
                             frames = wav_file.getnframes()
                             rate = wav_file.getframerate()
                             duration_seconds = frames / float(rate)
                             minutes, seconds = divmod(round(duration_seconds), 60)
-                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
-                        
-                        # 建立音訊紀錄字典
+                            duration = f"{minutes:02}:{seconds:02}"
                         audio_record = {
                             "filename": filename.replace('.wav', ''),
                             "filePath": file_path,
@@ -431,24 +463,25 @@ def get_music(request):
                             "duration": duration,
                             "type": "drum"
                         }
+                        print(f"[get_music] 加入 drum 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
-
+            # 遍歷 drum_manual
+            print("[get_music] 開始遍歷 drum_manual 資料夾")
             for root, dirs, files in os.walk(upload_folder_drum_manual):
+                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
-                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
-
+                    print(f"[get_music] 檢查檔案: {filename}")
+                    if filename.endswith('.wav'):
+                        file_path = os.path.join(root, filename)
+                        print(f"[get_music] 處理 drum_manual 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                    
                         with wave.open(file_path, 'r') as wav_file:
                             frames = wav_file.getnframes()
                             rate = wav_file.getframerate()
                             duration_seconds = frames / float(rate)
                             minutes, seconds = divmod(round(duration_seconds), 60)
-                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
-                        
-                        # 建立音訊紀錄字典
+                            duration = f"{minutes:02}:{seconds:02}"
                         audio_record = {
                             "filename": filename.replace('.wav', ''),
                             "filePath": file_path,
@@ -456,24 +489,25 @@ def get_music(request):
                             "duration": duration,
                             "type": "drum_manual"
                         }
+                        print(f"[get_music] 加入 drum_manual 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
-
+            # 遍歷 trio_manual
+            print("[get_music] 開始遍歷 trio_manual 資料夾")
             for root, dirs, files in os.walk(upload_folder_trio_manual):
+                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    if filename.endswith('.wav'):  # 只處理 WAV 檔案
-                        file_path = os.path.join(root, filename)  # 包含子資料夾的完整路徑
-
+                    print(f"[get_music] 檢查檔案: {filename}")
+                    if filename.endswith('.wav'):
+                        file_path = os.path.join(root, filename)
+                        print(f"[get_music] 處理 trio_manual 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                    
                         with wave.open(file_path, 'r') as wav_file:
                             frames = wav_file.getnframes()
                             rate = wav_file.getframerate()
                             duration_seconds = frames / float(rate)
                             minutes, seconds = divmod(round(duration_seconds), 60)
-                            duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
-                        
-                        # 建立音訊紀錄字典
+                            duration = f"{minutes:02}:{seconds:02}"
                         audio_record = {
                             "filename": filename.replace('.wav', ''),
                             "filePath": file_path,
@@ -481,11 +515,15 @@ def get_music(request):
                             "duration": duration,
                             "type": "trio_manual"
                         }
+                        print(f"[get_music] 加入 trio_manual 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
-
+            print(f"[get_music] 最終回傳音訊紀錄數量: {len(audio_records)}")
             return JsonResponse(audio_records, safe=False, status=200)
 
         except Exception as e:
+            print("[get_music] 發生例外:", e)
+            import traceback
+            traceback.print_exc()
             return JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt        
@@ -600,6 +638,11 @@ def set_user_info(request):
             user_id = metadata_dict.get('userId')
             user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
             user_table_path = os.path.join(user_folder, f'{user_id}.csv')
+
+            print("user_table_path: ", user_table_path)
+            print("metadata_dict: ", metadata_dict)
+            print("user_id: ", user_id)
+            print("os.path.exists(user_table_path): ", os.path.exists(user_table_path))
             
             # 檢查 CSV 文件是否存在
             if not os.path.exists(user_table_path):
@@ -715,8 +758,8 @@ def set_music_info(request):
             if not os.path.exists(music_table_path):
                 return JsonResponse({'error': f'Music table {music_table_path} does not exist.'}, status=400)
             
-            # 排除 user_id
-            data_to_update = {key: value for key, value in metadata_dict.items() if key != 'userId'}
+            # 排除 user_id 並移除值為 None 的欄位
+            data_to_update = {key: value for key, value in metadata_dict.items() if key != 'userId' and value is not None}
             
             # 更新用戶資料
             update_music_table(user_id, data_to_update)
@@ -1074,32 +1117,50 @@ def generate(request):
         return JsonResponse({'error': 'Invalid request method'}, status=400)
     try:
         data = json.loads(request.body.decode("utf-8"))
-        mode = data.get('mode', 'normal')
-        uuid = data.get('uuid')
+        mode = data.get('mode', 'normal')     
         userId = data.get('user_id')
+
         coughlist_str = data.get('cough_path', None)
+        print("cough_path:", coughlist_str)
         coughlist_path = [p for p in (coughlist_str.split('^') if coughlist_str else []) if p]
-        coughlist = [Path(p) for p in coughlist_path]
+        coughlist = [
+            Path(os.path.join(settings.MEDIA_ROOT, userId, 'cough_audio', p + '.wav'))
+            for p in coughlist_path
+        ]
         cough_length = len(coughlist_path)
+        uuid_this = str(uuid.uuid4())
+        print(f'mode: {mode}, userId: {userId}, coughlist: {coughlist_path}')
 
-        if cough_length == 7:
-            mode = 'drum_manual'
-            print("[generate] mode set to drum_manual")
-        elif cough_length in (2, 3, 4):
-            mode = 'trio_manual'
-            print("[generate] mode set to trio_manual")
-        """
-        if not uuid or uuid == "":
-            uuid = str(uuid_lib.uuid4())"""
-        uuid = str(uuid_lib.uuid4())
-        print("[generate] uuid:", uuid)
-        job = GenerateJob(mode, data, uuid, userId, coughlist)
+        # Determine mode based on cough count and input flag
+        if mode == 'co_create_trio':
+            if cough_length == 1:
+                mode = 'trio'
+                print("[generate] mode set to trio (1 input)")
+            elif 2<= cough_length <= 4:
+                mode = 'trio_manual'
+                print(f"[generate] mode set to trio_manual ({cough_length} inputs)")
+            else:
+                return JsonResponse({'error': 'Trio mode supports 2-4 cough inputs.'}, status=400)
+            print('------------')
+        elif mode == 'co_create_drum':
+            # if cough_length == 1:
+            #     mode = 'drum'
+            if 1 <= cough_length <= 6:
+                # Auto-fill up to 7 in GenerateJob class later
+                mode = 'drum'
+                print(f"[generate] mode set to drum_autofill ({cough_length} inputs)")
+            elif cough_length == 7:
+                mode = 'drum_manual'
+                print("[generate] mode set to drum_manual (7 inputs)")
+            else:
+                return JsonResponse({'error': 'Drum mode supports 1-7 cough inputs.'}, status=400)
 
-        generate_task_queue.put(job)  # 將 job 放入 queue
-
-        task_progress[uuid] = job  # 將 job 存入 task_progress
-
-        return JsonResponse({'status': 'queued', 'uuid': uuid}, status=202)
+        print(f"[generate] mode: {mode}, userId: {userId}, coughlist: {coughlist_path}")
+        job = GenerateJob(mode, data, uuid_this, userId, coughlist)
+        generate_task_queue.put(job)
+        task_progress[uuid_this] = job
+        return JsonResponse({'status': 'queued', 'uuid': uuid_this}, status=202)
+    
     except Exception as e:
         print("[generate] 發生例外:", e)
         import traceback
