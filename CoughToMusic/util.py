@@ -1,6 +1,6 @@
 import os
 from django.conf import settings
-from .lib import cough, Fake_cough_filter, cough_cluster, filter, classify_coughs
+from .lib import cough, Fake_cough_filter, cough_cluster, filter, filter_template
 import wave
 import shutil
 import datetime
@@ -72,6 +72,8 @@ def generate_music(user_id, cough_path, filename, bass_music = "tuba", alto_musi
         instrument_alto=alto_music,
         instrument_high=high_music
     )
+
+    print(f"Generating music for {cough_instance.filename} with instruments: {bass_music}, {alto_music}, {high_music}") 
     
     cough_instance.midi_generation()
     cough_instance.write_audio()
@@ -276,6 +278,9 @@ def clustering(audio_path, sample_rate, all_cough_file_path, csv_file_path, temp
 
 def filter_coughs(audio_path):
     filter.process_audio(audio_path)
+
+def filter_coughs_template(audio_path):
+    filter_template.process_audio(audio_path)
     
     
 def classify_cough_event(cough_wav_path, user_data_path, template_data_path, strict_mode=True):
@@ -287,5 +292,16 @@ def classify_cough_event(cough_wav_path, user_data_path, template_data_path, str
     :param strict_mode: 是否啟用嚴格模式
     :return: 分類結果
     """
-    return classify_coughs.classify_cough_file(cough_wav_path, user_data_path, template_data_path, strict_mode)
+    return cough_cluster.classify_cough_file(cough_wav_path, user_data_path, template_data_path, strict_mode)
     
+def clustering(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir):
+    """
+    對音頻進行聚類，返回聚類結果。
+    :param file_path: 音頻文件的路徑
+    :param sample_rate: 音頻的采樣率
+    :param all_cough_file_path: 所有咳嗽音頻的路徑
+    :param cough_csv_path: 咳嗽 CSV 文件的路徑
+    :param template_path_dir: 模板數據的路徑
+    :return: 聚類結果
+    """
+    return cough_cluster.cluster_audio(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir)

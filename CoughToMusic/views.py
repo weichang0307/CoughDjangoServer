@@ -1,11 +1,11 @@
 import os
 from django.views.decorators.csrf import csrf_exempt
-from .util import save_pcm16_to_wav, init_user_folder, save_music_move, save_wav_with_resample, save_pcm16_to_wav, fake_cough_dist, clustering, filter_coughs, classify_cough_event
+from .util import save_pcm16_to_wav, init_user_folder, save_music_move, save_wav_with_resample, save_pcm16_to_wav, fake_cough_dist, filter_coughs, clustering, classify_cough_event, filter_coughs_template
 from .table import update_user_table, init_user_table, init_cough_table, update_cough_table, init_music_table, update_music_table
 from .co_create_utils import save_final_cocreate
 from .task import GenerateJob, task_progress
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import JsonResponse 
 from django.http import Http404
 from django.http import HttpResponse
 import shutil
@@ -20,14 +20,19 @@ from threading import Thread
 from queue import Queue
 import warnings
 import soundfile as sf
-
 warnings.filterwarnings("ignore", category=UserWarning, module="pyloudnorm")
 import wave
 from pathlib import Path
 
+import pandas as pd
+
+# === 模型與參數 ===
+
+
 USER_TABLE_COLUMNS = ['isSignUp', 'name', 'age', 'gender', 'education', 'musicProficiency', 'isCoughPublish', 'userEmail','bestSong1','bestSong2','bestSong3','isSmoker']
 COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time', 'latitude', 'longitude', 'clusterID', 'people']
 MUSIC_TABLE_COLUMNS = ['filename', 'timestamp', 'time']
+
 
 generate_task_queue = Queue()
 processing_jobs = []  # 存放處理中的工作
@@ -131,7 +136,7 @@ def set_template(request):
 
         # 保存音頻檔案
         save_pcm16_to_wav(file_path, audio_data, sample_rate)
-        filter_coughs(file_path)
+        #filter_coughs_template(file_path)
         #save_wav_with_resample(file_path, audio_data)
 
 
@@ -206,53 +211,94 @@ def create_cough_audio(request):
                 template_data_path=template_path_dir,
                 strict_mode=True
             )
+            print(f"[create_cough_audio] Classification result: {classification_result}")
 
 
             # 預備處理公開咳嗽音頻
 
             # 音檔太短會報錯
             clusterid = clustering(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir)
-
+            time_stamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             has_non_user_cough = classification_result['has_non_user_cough']
+            
             has_user_cough = classification_result['has_user_cough']
-            if has_non_user_cough and  has_user_cough:
-            # 建立分離資料夾
-                splited_folder = os.path.join(settings.MEDIA_ROOT, userid, 'split_cough_audio')
-                os.makedirs(splited_folder, exist_ok=True)
-                splited_cough_folder = os.path.join(splited_folder, filename.replace('.wav', ''))
-                os.makedirs(splited_cough_folder, exist_ok=True)
 
-                sf.write(os.path.join(splited_cough_folder, filename.replace('.wav', '') + '_user.wav'), classification_result['user_output'], classification_result['sample_rate'])
-                sf.write(os.path.join(splited_cough_folder, filename.replace('.wav', '') + '_non_user.wav'), classification_result['non_user_output'], classification_result['sample_rate'])
-                
-            if isCoughPub and result == True and not has_non_user_cough:
+            pubCoughID = '-1'
+
+            if isCoughPub and result == True and not (has_non_user_cough and has_user_cough):
                 folder_path_public = os.path.join(settings.MEDIA_ROOT, 'public_cough')
                 #    os.makedirs(folder_path_public, exist_ok=True)
                 existing_files = os.listdir(folder_path_public)
                 file_count = len(existing_files)
-                filename = f"{file_count + 1}.wav"
+                pubCoughID =str( file_count + 1)
                 # 保存公開的音頻文件
-                file_path_public = os.path.join(folder_path_public, filename)
+                file_path_public = os.path.join(folder_path_public, pubCoughID)+'.wav'
                 save_pcm16_to_wav(file_path_public, audio_data, sample_rate)
                 filter_coughs(file_path_public)
-                #save_wav_with_resample(file_path, audio_data)
-
-                # 回應成功
-            
-
+                # save_wav_with_resample(file_path, audio_data)
             cough_table_data = {
                 'filename': filename,
-                'timestamp': datetime.datetime.now().timestamp(),
-                'pubCoughID': filename,
+                'timestamp':time_stamp,
+                'pubCoughID': pubCoughID,
                 'time': time,
                 'latitude': latitude,
                 'longitude': longitude,
                 'clusterID': clusterid,  
                 'people' : has_non_user_cough and has_user_cough
             }
-
             update_cough_table(userid, cough_table_data)
+            # 如果有非使用者咳嗽和使用者咳嗽，則儲存音訊檔案
+            if has_non_user_cough and  has_user_cough:
+
+                # splited_folder = os.path.join(settings.MEDIA_ROOT, userid, 'split_cough_audio')
+                # os.makedirs(splited_folder, exist_ok=True)
+                # splited_cough_folder = os.path.join(splited_folder, filename.replace('.wav', ''))
+                # os.makedirs(splited_cough_folder, exist_ok=True)
+                # sf.write(os.path.join(splited_cough_folder, filename.replace('.wav', '') + '_1.wav'), classification_result['user_output'], classification_result['sample_rate'])
+                # sf.write(os.path.join(splited_cough_folder, filename.replace('.wav', '') + '_2.wav'), classification_result['non_user_output'], classification_result['sample_rate'])
+                user_filename = os.path.join(all_cough_file_path,  filename.replace('.wav', '') + '_1.wav')
+                non_user_filename = os.path.join(all_cough_file_path,  filename.replace('.wav', '') + '_2.wav')
+                sf.write(user_filename, classification_result['user_output'], classification_result['sample_rate'])
+                sf.write(non_user_filename, classification_result['non_user_output'], classification_result['sample_rate'])
+                folder_path_public = os.path.join(settings.MEDIA_ROOT, 'public_cough')
+                existing_files = os.listdir(folder_path_public)
+                file_count = len(existing_files)
+                pubCoughID =str( file_count + 1)
+                print(f"[user] Saving public cough audio to {pubCoughID}")
+                # 保存公開的音頻文件
+                file_path_public = os.path.join(folder_path_public, pubCoughID)+'.wav'
+                cough_table_data = {
+                    'filename': filename.replace('.wav', '') + '_1.wav',
+                    'timestamp':time_stamp,
+                    'pubCoughID': pubCoughID,
+                    'time': time,
+                    'latitude': latitude,
+                    'longitude': longitude,
+                    'clusterID': 0,  
+                    'people' : False
+                }
+                update_cough_table(userid, cough_table_data)
+                sf.write(os.path.join(folder_path_public, f'{pubCoughID}.wav'), classification_result['user_output'], classification_result['sample_rate'])
+                existing_files = os.listdir(folder_path_public)
+                file_count = len(existing_files)
+                pubCoughID =str( file_count + 1)
+                print(f"[non_user] Saving public cough audio to {pubCoughID}")
+                file_path_public = os.path.join(folder_path_public, pubCoughID) + '.wav'
+                cough_table_data = {
+                    'filename':  filename.replace('.wav', '') + '_2.wav',
+                    'timestamp':time_stamp,
+                    'pubCoughID': pubCoughID,
+                    'time': time,
+                    'latitude': latitude,
+                    'longitude': longitude,
+                    'clusterID': 1,  
+                    'people' : False
+                }
+                update_cough_table(userid, cough_table_data)
+                sf.write(os.path.join(folder_path_public, f'{pubCoughID}.wav'), classification_result['non_user_output'], classification_result['sample_rate'])
+
             return JsonResponse({'IsSaving':'true','message': 'Audio data received successfully.'}, status=200)
+        
         else:
             # 如果是假咳嗽，則不儲存音訊檔案
             print("Fake cough detected, not saving the audio file.")
@@ -272,49 +318,49 @@ def create_cough_audio(request):
 def get_coughs(request):
     if request.method == 'POST':
         try:
-            # 準備回傳的音訊資料
             audio_records = []
             metadata_dict = json.loads(request.body)
             userid = metadata_dict.get('userId')
             upload_folder = os.path.join(settings.MEDIA_ROOT, userid, 'cough_audio')
-
             cough_table_path = os.path.join(upload_folder, 'cough_table.csv')
             df = None
             if os.path.exists(cough_table_path):
                 df = pd.read_csv(cough_table_path)
 
             for filename in os.listdir(upload_folder):
-                if filename.endswith('.wav'):  # 只處理 WAV 檔案
+                if filename.endswith('.wav'):
                     file_path = os.path.join(upload_folder, filename)
-
                     timestamp = os.path.getmtime(file_path)
                     formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                    
                     with wave.open(file_path, 'r') as wav_file:
                         frames = wav_file.getnframes()
                         rate = wav_file.getframerate()
                         duration_seconds = frames / float(rate)
                         minutes, seconds = divmod(round(duration_seconds), 60)
-                        duration = f"{minutes:02}:{seconds:02}"  # 格式化為 分:秒
+                        duration = f"{minutes:02}:{seconds:02}"
 
-                    # 取得對應 clusterID
                     cluster_id = None
+                    people = None
                     if df is not None:
-                        base_name = filename.replace('.wav', '')
-                        match = df[df['time'] == base_name]
+                        # 取得 base_name
+                        match = df[df['filename'] == filename]
                         if not match.empty:
                             cluster_id = str(int(match.iloc[0]['clusterID']))
-                    
-                    
-                    # 建立音訊紀錄字典
-                    audio_record = {
-                        "filename": filename.replace('.wav', ''),
-                        "filePath": file_path,
-                        "timestamp": formatted_timestamp,
-                        "duration": duration,
-                        "clusterID": cluster_id 
-                    }
-                    audio_records.append(audio_record)
+                            # 取得 people 欄位
+                            people = match.iloc[0].get('people', None)
+          
+                    # 只回傳 people 為 False 的咳嗽
+                    if people == False:
+                        print("filename:", filename) 
+                        print("file_path:", file_path)   
+                        audio_record = {
+                            "filename": filename.replace('.wav', ''),
+                            "filePath": file_path,
+                            "timestamp": formatted_timestamp,
+                            "duration": duration,
+                            "clusterID": cluster_id
+                        }
+                        audio_records.append(audio_record)
 
             return JsonResponse(audio_records, safe=False, status=200)
 
@@ -324,8 +370,10 @@ def get_coughs(request):
 
  
 def get_uploads_file(request, filename):
+    #print(f"[get_uploads_file] Requested filename: {filename}")
     filename = filename.replace('^', '/') 
     file_path = filename
+    #print(f"[get_uploads_file] Requested file path: {file_path}")
 
     if not os.path.exists(file_path):
         raise Http404("File not found")
@@ -622,6 +670,8 @@ def get_user_info(request):
             
             # 獲取所有資料
             user_info = df.to_dict(orient='records')
+            print("user_info: ", user_info)
+            print("user_info[0]: ", user_info[0])
             return JsonResponse(user_info[0], status=200)
             
         except Exception as e:
@@ -783,13 +833,16 @@ def get_cough_statistics(request):
             end_date = metadata_dict.get('endDate')
             cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
             
+            
             if not os.path.exists(cough_table_path):
                 return JsonResponse({'error': 'Cough CSV file not found.'}, status=400)
             
             cough_df = pd.read_csv(cough_table_path)
             
+            
             # 轉換 timestamp 為 datetime
-            cough_df['timestamp'] = pd.to_datetime(cough_df['timestamp'], unit='s')
+            cough_df['timestamp'] = pd.to_datetime(cough_df['timestamp'])
+            
             
             # 計算一天、一周、一月內的咳嗽功能使用次數
             now = datetime.datetime.now()

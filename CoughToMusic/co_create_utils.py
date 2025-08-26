@@ -110,8 +110,8 @@ def id_to_pth(id, track, music_motif):
             return os.path.join(settings.MOTIF_BASS_WAV, f'bass_{id}.wav')
         elif track == 'drum':
             return os.path.join(settings.MOTIF_DRUM_WAV, f'drum_{id}.wav')
-        # elif track == 'trio':
-        #     return os.path.join(settings.TRACK_TRIO_WAV, f'trio_{id}.wav')
+        elif track == 'trio':
+            return os.path.join(settings.MOTIF_TRIO_WAV, f'trio_{id}.wav')
 
     # fallback: raise an exception if no match
     raise ValueError(f"No path matched for track='{track}', music_motif='{music_motif}'")
@@ -139,7 +139,8 @@ def cough2midi(id, inst, user_folder, uuid, sample_rate=16000):
         'acc': id_to_pth(id, 'acc', 'mtf_wav'),
         'bass': id_to_pth(id, 'bass', 'mtf_wav')
     }
-    merged_output_path = os.path.join(user_folder,  f'{uuid}_short_trio.wav')
+    # merged_output_path = os.path.join(user_folder,  f'{uuid}_short_trio.wav')
+    merged_output_path = os.path.join(settings.MOTIF_TRIO_WAV, f'trio_{id}.wav')
     for trk, program in instruments.items():
         midi_path = midi_paths[trk]
         wav_path = wav_paths_mp[trk]
@@ -161,27 +162,49 @@ def cough2midi(id, inst, user_folder, uuid, sample_rate=16000):
     # print("Cough to mid Execution")
     # return merged_output_path
 
-def cough2mid_manual(cough_pth, usr_folder, mid_dic):
+def cough2mid_manual(cough_pth, usr_folder, mid_dic, sample_rate=16000):
     cough_name = os.path.splitext(os.path.basename(cough_pth))[0]
     mel_mtf = os.path.join(usr_folder, f'{cough_name}_mel_mtf.mid')
     acc_mtf = os.path.join(usr_folder, f'{cough_name}_acc_mtf.mid')
     bass_mtf = os.path.join(usr_folder, f'{cough_name}_bass_mtf.mid')
     cough2mid.cough2midi(cough_pth, mel_mtf, **MEL_CONFIG)
-    cough2mid.correct_key(mel_mtf,mel_mtf)
-    print("start Append mel")  
+    cough2mid.correct_key(mel_mtf, mel_mtf)
     mid_dic['mel'].append(mel_mtf)
-    print("end Append mel")  
     cough2mid.cough2midi(cough_pth, acc_mtf, **ACC_CONFIG)
-    cough2mid.correct_key(acc_mtf,acc_mtf)
-    print("start Append acc")  
+    cough2mid.correct_key(acc_mtf, acc_mtf)
     mid_dic['acc'].append(acc_mtf)
-    print("end Append acc")  
     cough2mid.cough2midi(cough_pth, bass_mtf, **BASS_CONFIG)
-    cough2mid.correct_key(bass_mtf,bass_mtf) 
-    print("start Append bass_mtf")   
+    cough2mid.correct_key(bass_mtf, bass_mtf)
     mid_dic['bass'].append(bass_mtf)
-    print("end Append bass_mtf")
-    print(f"mid_dic lengths: mel({len(mid_dic['mel'])}), acc({len(mid_dic['acc'])}), bass({len(mid_dic['bass'])})")
+    print('start generating motif wavs ')
+
+    # === 更新 MIDI program number ===
+    midi.update_midi_program(mel_mtf, os.path.join(usr_folder, f'{cough_name}_mel_motif.mid'), program_number=instruments['mel'])
+    midi.update_midi_program(acc_mtf, os.path.join(usr_folder, f'{cough_name}_acc_motif.mid'), program_number=instruments['acc'])
+    midi.update_midi_program(bass_mtf, os.path.join(usr_folder, f'{cough_name}_bass_motif.mid'), program_number=instruments['bass'])
+
+    # 產生三軌 wav
+    mel_wav = os.path.join(usr_folder, f'{cough_name}_mel_mtf.wav')
+    acc_wav = os.path.join(usr_folder, f'{cough_name}_acc_mtf.wav')
+    bass_wav = os.path.join(usr_folder, f'{cough_name}_bass_mtf.wav')
+
+    midi.write_from_midi(os.path.join(usr_folder, f'{cough_name}_mel_motif.mid'), mel_wav, 'violin')
+    midi.write_from_midi(os.path.join(usr_folder, f'{cough_name}_acc_motif.mid'), acc_wav, 'violin')
+    midi.write_from_midi(os.path.join(usr_folder, f'{cough_name}_bass_motif.mid'), bass_wav, 'violin')
+    print('start merging motif wavs ')
+    # 合併三軌
+    mel, _ = librosa.load(mel_wav, sr=sample_rate)
+    acc, _ = librosa.load(acc_wav, sr=sample_rate)
+    bass, _ = librosa.load(bass_wav, sr=sample_rate)
+    max_length = max(len(mel), len(acc), len(bass))
+    mel = np.pad(mel, (0, max_length - len(mel)), 'constant')
+    acc = np.pad(acc, (0, max_length - len(acc)), 'constant')
+    bass = np.pad(bass, (0, max_length - len(bass)), 'constant')
+    merged = mel + acc + bass
+    trio_wav = os.path.join(usr_folder, f'{cough_name}_trio_mtf.wav')
+    sf.write(trio_wav, merged, sample_rate)
+    return trio_wav
+
 
 
 def gen_trio_mid(id):
@@ -193,9 +216,15 @@ def gen_trio_mid(id):
         sequence_pth =[id_to_pth(id, trk, 'mtf') for id in sequence]
         intrp_mid_pth = id_to_pth(id, trk, 'mid')
         generate_melody_from_sequence(sequence_pth, intrp_mid_pth)
-    used_cough_paths = [os.path.join(settings.PUBLIC_COUGH, f"{i}.wav") for i in sequence]
-
-    return used_cough_paths
+    used_cough_paths = [
+        os.path.join(settings.PUBLIC_COUGH, f"{i}.wav")
+        for i in sequence if str(i) != str(id)
+    ]
+    used_motif_paths = [
+        os.path.join(settings.MOTIF_TRIO_WAV, f"trio_{i}.wav")
+        for i in sequence if str(i) != str(id)
+    ]
+    return used_cough_paths, used_motif_paths
         # if trk != 'mel':
             # ref_pth = id_to_pth(id, 'mel', 'mid')
             # print(f"Correcting key for {ref_pth, intrp_mid_pth}")
@@ -311,6 +340,7 @@ def gen_trio_trk(id, inst, user_folder,uuid, sample_rate=16000):
 
 
 def generate_groove_intp_manual(cough_path_list, user_folder, uuid):
+    print(f'cough_path_list: {cough_path_list}')
     assert len(cough_path_list) == 7, "Expecting exactly 7 cough files"
     drum_trk = os.path.join(user_folder, f'{uuid}_drum.wav')
     selected_coughs, df = process_manual_coughs(cough_path_list)
@@ -323,12 +353,18 @@ def generate_groove_intp_manual(cough_path_list, user_folder, uuid):
     tmp_last2 = 'tmp/last2.mid'
 
     cough_seq = list(selected_coughs.items())
-
+    motif_list = []
     def save_midi(seq_slice, out_path):
         subset = dict(cough_seq[seq_slice])
         write_midi_pretty_manual(subset, df, cough_path_list, out_path)
         midi.adjust_to_2bars(out_path, out_path)
         return out_path
+    for i in range(len(cough_seq)):
+        mid_path = save_midi(slice(i, i+1), f'tmp/drum_motif{i}.mid')
+        wav_path = str(Path(mid_path).with_suffix('.wav'))
+        midi.write_from_midi(mid_path, wav_path)
+        print(f"Generated motif {i} at {wav_path}")
+        motif_list.append(wav_path)
 
     tmp_first = save_midi(slice(0, 1), tmp_first)
     tmp_sec = save_midi(slice(0, 2), tmp_sec)
@@ -349,7 +385,7 @@ def generate_groove_intp_manual(cough_path_list, user_folder, uuid):
     midi.write_from_midi(tmp_last, drum_trk)
 
     print(f"Manual drum groove generated at {drum_trk}")
-    return drum_trk
+    return drum_trk, motif_list
 
 
 def generate_groove_intp_autofill(user_paths, public_folder, user_folder, uuid):
@@ -365,12 +401,18 @@ def generate_groove_intp_autofill(user_paths, public_folder, user_folder, uuid):
     drum_motif_trk = os.path.join(user_folder, f'{uuid}_short_drum.wav')
 
     cough_seq = list(selected_coughs.items())
-
+    motif_list = []
     def save_midi(seq_slice, out_path):
         subset = dict(cough_seq[seq_slice])
         write_midi_pretty_manual(subset, df, list(id_to_path.values()), out_path)
         midi.adjust_to_2bars(out_path, out_path)
         return out_path
+    for i in range(len(cough_seq)):
+        mid_path = save_midi(slice(i, i+1), f'tmp/drum_motif{i}.mid')
+        wav_path = str(Path(mid_path).with_suffix('.wav'))
+        midi.write_from_midi(mid_path, wav_path)
+        print(f"Generated motif {i} at {wav_path}")
+        motif_list.append(wav_path)
 
     tmp_first = save_midi(slice(0, 1), tmp_first)
     tmp_sec = save_midi(slice(0, 2), tmp_sec)
@@ -392,7 +434,7 @@ def generate_groove_intp_autofill(user_paths, public_folder, user_folder, uuid):
     midi.write_from_midi(tmp_last, drum_trk)
     used_paths = [id_to_path[cid] for cid in selected_coughs.values() if cid in df["name"].values]
 
-    return drum_trk, used_paths
+    return drum_trk, used_paths, motif_list
 
 
 # def batch_update_midi_programs(directory, program_number, channel=0):
@@ -558,3 +600,52 @@ def save_final_cocreate(user_id, uuid, filename_display):
 # gen_trio_mid(15)
 # generate_path_trio = gen_trio_trk(15, 'string', './media/jag22325477@gapp.nthu.edu.tw/temp_trio', 'u256uid', sample_rate=16000)
 
+
+# def merge_mtf_wav_to_trio():
+#     mel_mid_dir = settings.MOTIF_MEL_MID
+#     acc_mid_dir = settings.MOTIF_ACC_MID
+#     bass_mid_dir = settings.MOTIF_BASS_MID
+#     public_cough_dir = settings.PUBLIC_COUGH    
+#     mel_wav_dir = settings.MOTIF_MEL_WAV
+#     acc_wav_dir = settings.MOTIF_ACC_WAV
+#     bass_wav_dir = settings.MOTIF_BASS_WAV
+
+#     trio_wav_dir = settings.MOTIF_TRIO_WAV
+#     sample_rate = 16000  # 根據你的專案設定
+
+    # 遍歷 mel_wav 目錄下所有 mel_*.wav
+    # for  i, cough  in enumerate(os.listdir(public_cough_dir)):
+        # if  cough.endswith(".wav"):
+        #     id = os.path.splitext(cough)[0]  # 提取 ID
+# for i in range (361, 368):
+#             # print(f"Processing ID: {id}")
+#             print(f'i', i)
+#             cough2midi(i, 'string', './tmp', 'u256uid', sample_rate=16000)
+#             print(f"Generated MIDI for ID: {i}")
+            # midi.update_midi_program(os.path.join(acc_mid_dir, file), os.path.join(acc_mid_dir, f"acc_{id}.mid"), program_number=41)
+            # midi.write_from_midi(os.path.join(acc_mid_dir, file), os.path.join(acc_wav_dir, f"acc_{id}.wav"), 'violin')
+            # # acc_path = os.path.join(acc_wav_dir, f"acc_{id}.wav")
+            # midi.update_midi_program(os.path.join(acc_mid_dir, f"acc_{id}.mid"), os.path.join(acc_mid_dir, f"acc_{id}.mid"), program_number=0)
+            # acc_path = os.path.join(acc_wav_dir, f"acc_{id}.wav")
+            # bass_path = os.path.join(bass_wav_dir, f"bass_{id}.wav")
+            # trio_path = os.path.join(trio_wav_dir, f"trio_{id}.wav")
+
+            # # 檢查三軌都存在才合併
+            # if not (os.path.exists(mel_path) and os.path.exists(acc_path) and os.path.exists(bass_path)):
+            #     print(f"Skip id {id}: some track missing.")
+            #     continue
+
+            # mel, _ = librosa.load(mel_path, sr=sample_rate)
+            # acc, _ = librosa.load(acc_path, sr=sample_rate)
+            # bass, _ = librosa.load(bass_path, sr=sample_rate)
+
+            # max_length = max(len(mel), len(acc), len(bass))
+            # mel = np.pad(mel, (0, max_length - len(mel)), 'constant')
+            # acc = np.pad(acc, (0, max_length - len(acc)), 'constant')
+            # bass = np.pad(bass, (0, max_length - len(bass)), 'constant')
+
+            # merged = mel + acc + bass
+            # sf.write(trio_path, merged, sample_rate)
+            # print(f"Saved trio wav: {trio_path}")
+
+# merge_mtf_wav_to_trio()

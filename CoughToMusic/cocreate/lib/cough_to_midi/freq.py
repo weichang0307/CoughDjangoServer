@@ -12,6 +12,7 @@ import audio
 from cough_to_midi import onset
 
 
+
 def get_by_crepe(audio_data, sr, threshold, energy_threshold, energy_filter = True):
     print("Estimating pitch with CREPE...")
     time, frequency, confidence, _ = crepe.predict(audio_data, sr=sr, viterbi=True)
@@ -85,19 +86,52 @@ def log_scale_frequencies(frequencies, min_target, max_target):
     # print(f"Min frequency: {fmin_input}, Max frequency: {fmax_input}, Log min: {log_fmin_input}, Log max: {log_fmax_input}")  
     return np.array([log_scale_frequency(freq, log_fmin_input, log_fmax_input, min_target, max_target) for freq in frequencies])
 
-def write_midi(audio_data, sample_rate, audio_freq, filename,  min_target, max_target, freq_range_th, note_interval_th, break_th=60, onset_seg=True):#0.25, 20
+def write_midi(audio_data, sample_rate, audio_freq, filename,
+               min_target, max_target, freq_range_th, note_interval_th,
+               break_th=60, onset_seg=True, fallback_used=False):
+    
     _, f0 = audio_freq
     f0_scaled = log_scale_frequencies(f0, min_target, max_target)
     tempo = audio.get_tempo(audio_data, sample_rate)
-    result_array = interval_avg(f0_scaled)
-    notes_on_frame, notes_off_frame = audio.get_note_time(f0_scaled)
-    print("Converting to MIDI...")
-    if onset_seg:
-        onset_time = onset.detect(audio_data, sample_rate)
-        audio_duration = audio.get_duration(audio_data, sample_rate)
-        result_array, notes_on_frame, notes_off_frame = to_note_msg(onset_time, f0_scaled, freq_range_th, note_interval_th, break_th, audio_duration)
-        time_start_array_nstd, time_end_array_nstd = timeframes_to_sec(notes_on_frame, notes_off_frame, audio_duration / len(f0))
+    if tempo <= 0:
+        tempo = 120
     
+    print("Converting to MIDI...")
+    
+    if onset_seg:
+        print("Using onset segmentation...")
+        onset_time = onset.detect(audio_data, sample_rate)
+        print(f"Onset times: {onset_time}")
+        audio_duration = audio.get_duration(audio_data, sample_rate)
+        print(f"Audio duration: {audio_duration} seconds")
+
+        result_array, notes_on_frame, notes_off_frame = to_note_msg(
+            onset_time, f0_scaled, freq_range_th, note_interval_th, break_th, audio_duration)
+
+        if not result_array or all(p <= 1e-3 for p in result_array):
+            if fallback_used:
+                print(f"[ERROR] Fallback config also failed. Skipping {filename}.")
+                return False
+            print(f"[WARNING] Pitch tracking failed. Retrying with fallback config...")
+            fallback_config = {
+                "threshold": 0.1,
+                "freq_range_th": 0.45,
+                "note_interval_th": 60,
+                "min_target": "C1",
+                "max_target": "C3",
+                "energy_th": -1000
+            }
+            return write_midi(audio_data, sample_rate, audio_freq, filename,
+                              fallback_config["min_target"], fallback_config["max_target"],
+                              fallback_config["freq_range_th"], fallback_config["note_interval_th"],
+                              break_th, onset_seg, fallback_used=True)
+
+        print(f"Result array: {result_array}", 
+              f"Notes on frame: {notes_on_frame}", 
+              f"Notes off frame: {notes_off_frame}")
+        time_start_array_nstd, time_end_array_nstd = timeframes_to_sec(notes_on_frame, notes_off_frame, audio_duration / len(f0))
+        print(f"Time start array: {time_start_array_nstd}", 
+              f"Time end array: {time_end_array_nstd}")
     if len(result_array) == 0 or len(notes_on_frame) == 0 or len(notes_off_frame) == 0:
         print(f"Skipping file {filename} due to insufficient valid pitch data.")
         return False
@@ -130,6 +164,7 @@ def write_midi(audio_data, sample_rate, audio_freq, filename,  min_target, max_t
     midi = MIDIFile(1)
     midi.addTrackName(0, 0, "Sample Track")
     midi.addTempo(0, 0, new_tempo)
+    print(f"New tempo: {new_tempo}")
     add_notes_to_midi(midi, time_start_array_nstd, time_end_array_nstd, result_array)
 
     with open(f"{filename}", "wb") as output_file:
@@ -142,6 +177,7 @@ def write_midi(audio_data, sample_rate, audio_freq, filename,  min_target, max_t
 
 
 def to_note_msg(onset_time, f0, freq_range_th, note_interval_th, break_th , wavefile_time):
+    # print(f"Onset time: {onset_time}, F0: {f0}, Frequency range threshold: {freq_range_th}, Note interval threshold: {note_interval_th}, Break threshold: {break_th}, Wavefile time: {wavefile_time}")
     onset_point = audio.sec_to_timeframe(onset_time, wavefile_time, f0)
     result_array = []
     time_start_array = []

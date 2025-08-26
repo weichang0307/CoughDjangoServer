@@ -58,24 +58,31 @@ class GenerateJob:
                 print(f"cough_path: {cough_path}")
                 print(f"----------cough_path_trio_1: {cough_path}")
                 uuid = self.uuid
-                time_value = os.path.splitext(os.path.basename(cough_path))[0]
+                filename = os.path.splitext(os.path.basename(cough_path))[0]
+                print(f"filename: {filename}")
                 user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_trio')
                 os.makedirs(user_tmp_folder, exist_ok=True)
                 
                 cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
                 df = pd.read_csv(cough_table_path)
-                match = df[df['time'] == time_value]
+                match = df[df['filename'] == filename+'.wav']
                 pubCoughID = int(match.iloc[0]['pubCoughID'])
-                generate_path_triomotif = cough2midi(pubCoughID, 'string', user_tmp_folder, uuid, sample_rate=16000)
+                print(f"pubCoughID: {pubCoughID}")
+                generate_path_triomotif = Path(cough2midi(pubCoughID, 'string', user_tmp_folder, uuid, sample_rate=16000))
+
                 print('----generrate_trio_mid----')
-                used_cough_paths = gen_trio_mid(pubCoughID)  
+                used_cough_paths, used_motif_paths = gen_trio_mid(pubCoughID)  
                 print('----generrate_trio_trk----')
+                print('cough_paths',  [str(p) for p in self.coughlist])
+                print('cough_motifs',[str(generate_path_triomotif)])
+                print('used_public_paths', [str(p) for p in used_cough_paths])
+                print('used_motif_paths', [str(p) for p in used_motif_paths])
                 generate_path_trio = gen_trio_trk(pubCoughID, 'string', user_tmp_folder, uuid, sample_rate=16000)
-
-
                 self.result = {
                     'cough_paths':  [str(p) for p in self.coughlist],
+                    'cough_motifs': [str(generate_path_triomotif)],
                     'used_public_paths': [str(p) for p in used_cough_paths],
+                    'used_motif_paths': [str(p) for p in used_motif_paths],
                     'generated_music': generate_path_trio
                 }
                 print(self.result)
@@ -83,20 +90,22 @@ class GenerateJob:
             elif self.mode == 'trio_manual':
                 user_id = self.data['user_id']
                 uuid = self.uuid
-                # time_value = os.path.splitext(os.path.basename(cough_path))[0]
                 user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_manual_trio')
                 os.makedirs(user_tmp_folder, exist_ok=True)
-                # final_manual_dir = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_manual_trio')
-                # os.makedirs(final_manual_dir, exist_ok=True)
                 mid_dic = {'mel':[], 'acc':[], 'bass':[]}
-                for cough_pth in self.coughlist:
-                    cough2mid_manual(cough_pth, user_tmp_folder, mid_dic)
-                
+                merged_trio_motif_wavs = []
+                for filename in self.coughlist:
+                    trio_wav = cough2mid_manual(filename, user_tmp_folder, mid_dic)
+                    merged_trio_motif_wavs.append(trio_wav)
+                print('----generate_trio_mid_manual----')
                 gen_trio_manual(user_tmp_folder, mid_dic, uuid)
-                generated_manual_trio = gen_trio_trk_manual(user_tmp_folder,uuid, sample_rate=16000)
-
+                print('----generate_trio_trk_manual----')
+                generated_manual_trio = gen_trio_trk_manual(user_tmp_folder, uuid, sample_rate=16000)
+                print('cough_paths', [str(p) for p in self.coughlist])
+                print('cough_motifs', [str(p) for p in merged_trio_motif_wavs])
                 self.result = {
-                    'cough_paths': [str(p) for p in self.coughlist],
+                    'cough_paths': [str(p) for p in self.coughlist],                  
+                    'cough_motifs': [str(p) for p in merged_trio_motif_wavs],
                     'generated_music': generated_manual_trio
                 }
                 print(self.result)
@@ -124,15 +133,17 @@ class GenerateJob:
                 user_id = self.data['user_id']
                 cough_path = self.data['cough_path']
                 uuid = self.uuid
-                time_value = os.path.splitext(os.path.basename(cough_path))[0]
+                filename = os.path.splitext(os.path.basename(cough_path))[0]
                 user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_manual_drum')
                 os.makedirs(user_tmp_folder, exist_ok=True)
                 # final_manual_dir = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_manual_drum')
                 # os.makedirs(final_manual_dir, exist_ok=True)
-                generated_manual_drum = generate_groove_intp_manual(self.coughlist, user_tmp_folder, uuid)
-                print(self.result)
-                self.result = {
+                generated_manual_drum,  drum_motif_wavs= generate_groove_intp_manual(self.coughlist, user_tmp_folder, uuid)
+                print('cough_paths', [str(p) for p in self.coughlist])
+                print('cough_motifs', [str(p) for p in drum_motif_wavs])
+                self.result = { 
                     'cough_paths': [str(p) for p in self.coughlist],
+                    'cough_motifs': [os.path.join(settings.BASE_DIR, str(p)) for p in drum_motif_wavs],
                     'generated_music': generated_manual_drum
                 }
                 print(self.result)
@@ -144,19 +155,25 @@ class GenerateJob:
                 os.makedirs(user_tmp_folder, exist_ok=True)
                 public_base = os.path.abspath(settings.PUBLIC_COUGH)
                 try:
-                    generate_path_drum, used_public_paths = generate_groove_intp_autofill(
+                    generate_path_drum, used_public_paths, drum_motif_wavs = generate_groove_intp_autofill(
                         self.coughlist,
                         settings.PUBLIC_COUGH,
                         user_tmp_folder,
                         uuid
                     )
-
+                    print('cough_paths', [str(p) for p in self.coughlist])
+                    print('cough_motifs',[os.path.join(settings.BASE_DIR, str(p)) for p in drum_motif_wavs[:len(self.coughlist)]])
+                    
+                    print('used_public_paths', [str(p) for p in used_public_paths])
+                    print('used_motif_paths', [os.path.join(settings.BASE_DIR, str(p)) for p in drum_motif_wavs[len(self.coughlist):]])
                     self.result = {
                         'cough_paths': [str(p) for p in self.coughlist],
+                        'cough_motifs': [str(p) for p in drum_motif_wavs[:len(self.coughlist)]],
                         'used_public_paths':[
                             str(p) for p in used_public_paths
                             if os.path.abspath(p).startswith(public_base)
                         ],
+                        'used_motif_paths': [os.path.join(settings.BASE_DIR, str(p)) for p in drum_motif_wavs[len(self.coughlist):]],
                         'generated_music': generate_path_drum,
                     }
                     print(self.result)

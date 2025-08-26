@@ -8,6 +8,7 @@ import random
 from cough_to_midi.onset import *
 import audio
 import pretty_midi
+import midi
 
 
 DRUM_MAPPING = {
@@ -284,6 +285,7 @@ def merge_midi_tracks(input_midi, output_midi):
     merged_midi.instruments.append(merged_drum_track)
     merged_midi.write(output_midi)
     print(f"Merged MIDI saved: {output_midi}")
+    # return motif_paths
 
 def generate_drum_motif(folder_path, target_id, output_midi):
     

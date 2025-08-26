@@ -82,7 +82,7 @@ def concatenate_sequences(midi_path_start, midi_path_end, output_path):
 
 def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_path, target_duration=4.0):
     interp_note_seq = [normalize_sequence_duration(seq, target_duration) for seq in interp_note_seq]
-    # print(interp_note_seq)
+    # print(f'concate:', interp_note_seq)
 
     if end_note_seq == None:
         all_seq = [start_note_seq] + interp_note_seq
@@ -92,10 +92,12 @@ def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_
         )
     else:
         all_seq = [start_note_seq] + interp_note_seq + [end_note_seq] 
+        
         seq_durations =  (
             [start_note_seq.total_time]
             + [seq.total_time for seq in interp_note_seq]+ [end_note_seq.total_time]
         )
+    print(f'all_seq:', all_seq)
     final_seq = mm.sequences_lib.concatenate_sequences(all_seq, seq_durations)
     mm.sequence_proto_to_midi_file(final_seq, output_path)
     print(f"Interpolated MIDI file has been saved to: {output_path}")

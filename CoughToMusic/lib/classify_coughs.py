@@ -41,7 +41,7 @@ def waveform_to_examples(data, sample_rate):
         mel = preprocess_input(data[i:i+win], sr=params.SAMPLE_RATE)
         mel = np.pad(mel, ((0, max(0, 96 - mel.shape[0])), (0,0)), mode='constant')[:96]
         spec.append(mel)
-    return np.array(spec)
+    return np.array(spec, dtype=np.float32)
 
 def detect_onsets_for_plot(audio_data, sr, threshold=0.2, min_distance=MIN_ONSET_DISTANCE):
     onset_env = normalization(librosa.onset.onset_strength(y=audio_data, sr=sr))
@@ -174,7 +174,7 @@ def classify_cough_file(cough_wav_path, user_data_path, template_data_path, stri
     # Adjust thresholds for strict mode
     if strict_mode:
         global DIST_THRESHOLD
-        DIST_THRESHOLD = 0.36  # Stricter threshold
+        DIST_THRESHOLD = 0.24  # Stricter threshold
     
     # Load template features
     template_feats = [extract_file_feature(f) for f in glob.glob(os.path.join(template_data_path, "*.wav"))]
@@ -308,7 +308,7 @@ def classify_cough_file(cough_wav_path, user_data_path, template_data_path, stri
 
     result = {
         'has_user_cough': len(user_segs) > 0,
-        'has_non_user_cough': len(non_user_segs) >= 1,
+        'has_non_user_cough': len(non_user_segs) >= 2,
         'user_output': user_segments_sec,
         'non_user_output': non_user_segments_sec, 
         'sample_rate': sr
@@ -324,12 +324,12 @@ def classify_cough_example():
         template_data_path="template",
         strict_mode=True
     )
-    
+    """
     print("Classification Result:")
     print(f"Contains user cough: {result['has_user_cough']}")
     print(f"Contains non-user cough: {result['has_non_user_cough']}")
     print(f"User segments: {result['user_segments']}")
     print(f"Non-user segments: {result['non_user_segments']}")
-    print(f"Total cough duration: {result['total_duration']:.2f} seconds")
+    print(f"Total cough duration: {result['total_duration']:.2f} seconds")"""
     
     return result 

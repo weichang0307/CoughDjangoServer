@@ -134,10 +134,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOW_ALL_ORIGINS = True  # 或者設置具體的允許來源
 
 
+
 import os
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# MEDIA_ROOT = "D:/media"
 
 PUBLIC_COUGH = os.path.join(MEDIA_ROOT, 'public_cough')
 os.makedirs(PUBLIC_COUGH, exist_ok=True)
@@ -185,6 +187,8 @@ MOTIF_BASS_WAV = os.path.join(PUBLIC_MOTIF, 'bass_wav')
 os.makedirs(MOTIF_BASS_WAV, exist_ok=True)
 MOTIF_DRUM_WAV = os.path.join(PUBLIC_MOTIF, 'drum_wav')
 os.makedirs(MOTIF_DRUM_WAV, exist_ok=True)
+MOTIF_TRIO_WAV = os.path.join(PUBLIC_MOTIF, 'trio_wav')
+os.makedirs(MOTIF_TRIO_WAV, exist_ok=True)
 
 IMPORT_COUGH_FOLDER  = os.path.join(MEDIA_ROOT, 'import_cough')
 os.makedirs(IMPORT_COUGH_FOLDER, exist_ok=True)
