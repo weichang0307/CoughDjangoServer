@@ -272,9 +272,6 @@ def fake_cough_dist(cough_path, sample_rate=16000):
     result = Fake_cough_filter.detect_inhale(audio_data, sr)
     return result
 
-def clustering(audio_path, sample_rate, all_cough_file_path, csv_file_path, template_path_dir):
-
-    return cough_cluster.cluster_audio(audio_path, sample_rate, all_cough_file_path, csv_file_path, template_path_dir)
 
 def filter_coughs(audio_path):
     filter.process_audio(audio_path)
@@ -283,25 +280,69 @@ def filter_coughs_template(audio_path):
     filter_template.process_audio(audio_path)
     
     
+from .utils.runner import run_cli
+
 def classify_cough_event(cough_wav_path, user_data_path, template_data_path, strict_mode=True):
-    """
-    對咳嗽音頻進行分類，返回分類結果。
-    :param cough_wav_path: 咳嗽音頻的路徑
-    :param user_data_path: 使用者數據的路徑
-    :param template_data_path: 模板數據的路徑
-    :param strict_mode: 是否啟用嚴格模式
-    :return: 分類結果
-    """
-    return cough_cluster.classify_cough_file(cough_wav_path, user_data_path, template_data_path, strict_mode)
-    
+    payload = {
+        "mode": "classify",
+        "audio_path": cough_wav_path,
+        "user_data_path": user_data_path,
+        "template_data_path": template_data_path,
+        "strict_mode": strict_mode
+    }
+    res = run_cli(
+        python_exe=settings.YAMNET_PYTHON_EXE,
+        entry_py="C:/Users/DreamalityLab/Desktop/jayden/CoughDjangoServer/CoughToMusic/yamnet_worker/run_yamnet_worker.py",
+        payload=payload,
+        cwd=str(settings.BASE_DIR),
+        enable_log=False
+    )
+    return res.get("json")
+
 def clustering(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir):
-    """
-    對音頻進行聚類，返回聚類結果。
-    :param file_path: 音頻文件的路徑
-    :param sample_rate: 音頻的采樣率
-    :param all_cough_file_path: 所有咳嗽音頻的路徑
-    :param cough_csv_path: 咳嗽 CSV 文件的路徑
-    :param template_path_dir: 模板數據的路徑
-    :return: 聚類結果
-    """
-    return cough_cluster.cluster_audio(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir)
+    payload = {
+        "mode": "cluster",
+        "path": file_path,
+        "sample_rate": sample_rate,
+        "all_cough_file_path": all_cough_file_path,
+        "cough_csv_path": cough_csv_path,
+        "template_path_dir": template_path_dir
+    }
+    res = run_cli(
+        python_exe=settings.YAMNET_PYTHON_EXE,
+        entry_py="C:/Users/DreamalityLab/Desktop/jayden/CoughDjangoServer/CoughToMusic/yamnet_worker/run_yamnet_worker.py",
+        payload=payload,
+        cwd=str(settings.BASE_DIR),
+        enable_log=False
+    )
+
+    if res["ok"] and "cluster_id" in res["json"]:
+        return res["json"]["cluster_id"]
+    else:
+        print("[clustering] CLI worker error:", res)
+        return "error"
+
+
+
+# def classify_cough_event(cough_wav_path, user_data_path, template_data_path, strict_mode=True):
+#     """
+#     對咳嗽音頻進行分類，返回分類結果。
+#     :param cough_wav_path: 咳嗽音頻的路徑
+#     :param user_data_path: 使用者數據的路徑
+#     :param template_data_path: 模板數據的路徑
+#     :param strict_mode: 是否啟用嚴格模式
+#     :return: 分類結果
+#     """
+#     return cough_cluster.classify_cough_file(cough_wav_path, user_data_path, template_data_path, strict_mode)
+    
+# def clustering(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir):
+#     """
+#     對音頻進行聚類，返回聚類結果。
+#     :param file_path: 音頻文件的路徑
+#     :param sample_rate: 音頻的采樣率
+#     :param all_cough_file_path: 所有咳嗽音頻的路徑
+#     :param cough_csv_path: 咳嗽 CSV 文件的路徑
+#     :param template_path_dir: 模板數據的路徑
+#     :return: 聚類結果
+#     """
+#     return cough_cluster.cluster_audio(file_path, sample_rate, all_cough_file_path, cough_csv_path, template_path_dir)

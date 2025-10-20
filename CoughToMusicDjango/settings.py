@@ -193,5 +193,5 @@ os.makedirs(MOTIF_TRIO_WAV, exist_ok=True)
 IMPORT_COUGH_FOLDER  = os.path.join(MEDIA_ROOT, 'import_cough')
 os.makedirs(IMPORT_COUGH_FOLDER, exist_ok=True)
 
-
-
+from pathlib import Path
+YAMNET_PYTHON_EXE = r"C:\ProgramData\anaconda3\envs\k_yamnet\python.exe"

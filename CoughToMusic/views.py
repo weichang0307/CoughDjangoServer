@@ -136,7 +136,7 @@ def set_template(request):
 
         # 保存音頻檔案
         save_pcm16_to_wav(file_path, audio_data, sample_rate)
-        #filter_coughs_template(file_path)
+        filter_coughs_template(file_path)
         #save_wav_with_resample(file_path, audio_data)
 
 
@@ -211,7 +211,7 @@ def create_cough_audio(request):
                 template_data_path=template_path_dir,
                 strict_mode=True
             )
-            print(f"[create_cough_audio] Classification result: {classification_result}")
+            #print(f"[create_cough_audio] Classification result: {classification_result}")
 
 
             # 預備處理公開咳嗽音頻
@@ -249,13 +249,6 @@ def create_cough_audio(request):
             update_cough_table(userid, cough_table_data)
             # 如果有非使用者咳嗽和使用者咳嗽，則儲存音訊檔案
             if has_non_user_cough and  has_user_cough:
-
-                # splited_folder = os.path.join(settings.MEDIA_ROOT, userid, 'split_cough_audio')
-                # os.makedirs(splited_folder, exist_ok=True)
-                # splited_cough_folder = os.path.join(splited_folder, filename.replace('.wav', ''))
-                # os.makedirs(splited_cough_folder, exist_ok=True)
-                # sf.write(os.path.join(splited_cough_folder, filename.replace('.wav', '') + '_1.wav'), classification_result['user_output'], classification_result['sample_rate'])
-                # sf.write(os.path.join(splited_cough_folder, filename.replace('.wav', '') + '_2.wav'), classification_result['non_user_output'], classification_result['sample_rate'])
                 user_filename = os.path.join(all_cough_file_path,  filename.replace('.wav', '') + '_1.wav')
                 non_user_filename = os.path.join(all_cough_file_path,  filename.replace('.wav', '') + '_2.wav')
                 sf.write(user_filename, classification_result['user_output'], classification_result['sample_rate'])
@@ -351,8 +344,6 @@ def get_coughs(request):
           
                     # 只回傳 people 為 False 的咳嗽
                     if people == False:
-                        print("filename:", filename) 
-                        print("file_path:", file_path)   
                         audio_record = {
                             "filename": filename.replace('.wav', ''),
                             "filePath": file_path,
@@ -371,15 +362,18 @@ def get_coughs(request):
  
 def get_uploads_file(request, filename):
     #print(f"[get_uploads_file] Requested filename: {filename}")
-    filename = filename.replace('^', '/') 
+    filename = filename.replace('^', '/')
     file_path = filename
     #print(f"[get_uploads_file] Requested file path: {file_path}")
 
     if not os.path.exists(file_path):
+        #print(f"[get_uploads_file] File not found: {file_path}")
         raise Http404("File not found")
 
     file_size = os.path.getsize(file_path)
+    #print(f"[get_uploads_file] File size: {file_size}")
     range_header = request.headers.get('Range', '')
+    #print(f"[get_uploads_file] Range header: {range_header}")
     content_type = 'application/octet-stream'
 
     if range_header:
@@ -388,10 +382,13 @@ def get_uploads_file(request, filename):
             byte1, byte2 = range_val.split('-')
             byte1 = int(byte1)
             byte2 = int(byte2) if byte2 else file_size - 1
-        except:
+            #print(f"[get_uploads_file] Parsed range: byte1={byte1}, byte2={byte2}")
+        except Exception as e:
+            print(f"[get_uploads_file] Range parse error: {e}")
             return HttpResponse(status=400)
 
         length = byte2 - byte1 + 1
+        #print(f"[get_uploads_file] Streaming partial content: length={length}")
         f = open(file_path, 'rb')
         f.seek(byte1)
         response = StreamingHttpResponse(FileWrapper(f, blksize=8192), status=206, content_type=content_type)
@@ -399,14 +396,18 @@ def get_uploads_file(request, filename):
         response['Content-Range'] = f'bytes {byte1}-{byte2}/{file_size}'
         response['Accept-Ranges'] = 'bytes'
         response['Content-Disposition'] = f'attachment; filename="{os.path.basename(file_path)}"'
+        #print(f"[get_uploads_file] Response headers: Content-Length={response['Content-Length']}, Content-Range={response['Content-Range']}")
         return response
 
     else:
+        #print(f"[get_uploads_file] No range header, streaming full file")
         f = open(file_path, 'rb')
         response = StreamingHttpResponse(FileWrapper(f, blksize=8192), content_type=content_type)
         response['Content-Length'] = str(file_size)
         response['Accept-Ranges'] = 'bytes'
         response['Content-Disposition'] = f'attachment; filename="{os.path.basename(file_path)}"'
+        #print(f"[get_uploads_file] Response headers: Content-Length={response['Content-Length']}")
+        #print(response)
         return response
     
     
@@ -414,23 +415,23 @@ def get_uploads_file(request, filename):
 def get_music(request):
     if request.method == 'POST':
         try:
-            print("[get_music] 收到 POST 請求")
+            #print("[get_music] 收到 POST 請求")
             audio_records = []
             metadata_dict = json.loads(request.body)
-            print("[get_music] metadata_dict:", metadata_dict)
+            #print("[get_music] metadata_dict:", metadata_dict)
             userid = metadata_dict.get('userId')
-            print("[get_music] userid:", userid)
+            #print("[get_music] userid:", userid)
             upload_folder_normal = os.path.join(settings.MEDIA_ROOT, userid, 'generated_music')
             upload_folder_trio = os.path.join(settings.MEDIA_ROOT, userid, 'generated_trio')
             upload_folder_drum = os.path.join(settings.MEDIA_ROOT, userid, 'generated_autofill_drum')
             upload_folder_drum_manual = os.path.join(settings.MEDIA_ROOT, userid, 'generated_manual_drum')
             upload_folder_trio_manual = os.path.join(settings.MEDIA_ROOT, userid, 'generated_manual_trio')
-            print("[get_music] 資料夾路徑:")
-            print("  normal:", upload_folder_normal)
-            print("  trio:", upload_folder_trio)
-            print("  drum:", upload_folder_drum)
-            print("  drum_manual:", upload_folder_drum_manual)
-            print("  trio_manual:", upload_folder_trio_manual)
+            #print("[get_music] 資料夾路徑:")
+            #print("  normal:", upload_folder_normal)
+            #print("  trio:", upload_folder_trio)
+            #print("  drum:", upload_folder_drum)
+            #print("  drum_manual:", upload_folder_drum_manual)
+            #print("  trio_manual:", upload_folder_trio_manual)
             os.makedirs(upload_folder_normal, exist_ok=True)
             os.makedirs(upload_folder_trio, exist_ok=True)
             os.makedirs(upload_folder_drum, exist_ok=True)
@@ -438,14 +439,14 @@ def get_music(request):
             os.makedirs(upload_folder_trio_manual, exist_ok=True)
             
             # 遍歷 normal
-            print("[get_music] 開始遍歷 normal 資料夾")
+            #print("[get_music] 開始遍歷 normal 資料夾")
             for root, dirs, files in os.walk(upload_folder_normal):
-                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
+                #print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    print(f"[get_music] 檢查檔案: {filename}")
+                    #print(f"[get_music] 檢查檔案: {filename}")
                     if filename.endswith('.wav'):
                         file_path = os.path.join(root, filename)
-                        print(f"[get_music] 處理 normal 音檔: {file_path}")
+                        #print(f"[get_music] 處理 normal 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
                         with wave.open(file_path, 'r') as wav_file:
@@ -461,17 +462,17 @@ def get_music(request):
                             "duration": duration,
                             "type": "normal"
                         }
-                        print(f"[get_music] 加入 normal 音訊紀錄: {audio_record}")
+                        #print(f"[get_music] 加入 normal 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
             # 遍歷 trio
-            print("[get_music] 開始遍歷 trio 資料夾")
+            #print("[get_music] 開始遍歷 trio 資料夾")
             for root, dirs, files in os.walk(upload_folder_trio):
-                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
+                #print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    print(f"[get_music] 檢查檔案: {filename}")
+                    #print(f"[get_music] 檢查檔案: {filename}")
                     if filename.endswith('.wav'):
                         file_path = os.path.join(root, filename)
-                        print(f"[get_music] 處理 trio 音檔: {file_path}")
+                        #print(f"[get_music] 處理 trio 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
                         with wave.open(file_path, 'r') as wav_file:
@@ -487,15 +488,15 @@ def get_music(request):
                             "duration": duration,
                             "type": "trio"
                         }
-                        print(f"[get_music] 加入 trio 音訊紀錄: {audio_record}")
+                        #print(f"[get_music] 加入 trio 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
             for root, dirs, files in os.walk(upload_folder_drum):
-                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
+                #print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    print(f"[get_music] 檢查檔案: {filename}")
+                    #print(f"[get_music] 檢查檔案: {filename}")
                     if filename.endswith('.wav'):
                         file_path = os.path.join(root, filename)
-                        print(f"[get_music] 處理 drum 音檔: {file_path}")
+                        #print(f"[get_music] 處理 drum 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
                         with wave.open(file_path, 'r') as wav_file:
@@ -514,14 +515,14 @@ def get_music(request):
                         print(f"[get_music] 加入 drum 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
             # 遍歷 drum_manual
-            print("[get_music] 開始遍歷 drum_manual 資料夾")
+            #print("[get_music] 開始遍歷 drum_manual 資料夾")
             for root, dirs, files in os.walk(upload_folder_drum_manual):
-                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
+                #print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    print(f"[get_music] 檢查檔案: {filename}")
+                    #print(f"[get_music] 檢查檔案: {filename}")
                     if filename.endswith('.wav'):
                         file_path = os.path.join(root, filename)
-                        print(f"[get_music] 處理 drum_manual 音檔: {file_path}")
+                        #print(f"[get_music] 處理 drum_manual 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
                         with wave.open(file_path, 'r') as wav_file:
@@ -537,17 +538,17 @@ def get_music(request):
                             "duration": duration,
                             "type": "drum_manual"
                         }
-                        print(f"[get_music] 加入 drum_manual 音訊紀錄: {audio_record}")
+                        #print(f"[get_music] 加入 drum_manual 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
             # 遍歷 trio_manual
-            print("[get_music] 開始遍歷 trio_manual 資料夾")
+            #print("[get_music] 開始遍歷 trio_manual 資料夾")
             for root, dirs, files in os.walk(upload_folder_trio_manual):
-                print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
+                #print(f"[get_music] 目前資料夾: {root}, 檔案數: {len(files)}")
                 for filename in files:
-                    print(f"[get_music] 檢查檔案: {filename}")
+                    #print(f"[get_music] 檢查檔案: {filename}")
                     if filename.endswith('.wav'):
                         file_path = os.path.join(root, filename)
-                        print(f"[get_music] 處理 trio_manual 音檔: {file_path}")
+                        #print(f"[get_music] 處理 trio_manual 音檔: {file_path}")
                         timestamp = os.path.getmtime(file_path)
                         formatted_timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
                         with wave.open(file_path, 'r') as wav_file:
@@ -563,13 +564,13 @@ def get_music(request):
                             "duration": duration,
                             "type": "trio_manual"
                         }
-                        print(f"[get_music] 加入 trio_manual 音訊紀錄: {audio_record}")
+                        #print(f"[get_music] 加入 trio_manual 音訊紀錄: {audio_record}")
                         audio_records.append(audio_record)
-            print(f"[get_music] 最終回傳音訊紀錄數量: {len(audio_records)}")
+            #print(f"[get_music] 最終回傳音訊紀錄數量: {len(audio_records)}")
             return JsonResponse(audio_records, safe=False, status=200)
 
         except Exception as e:
-            print("[get_music] 發生例外:", e)
+            #print("[get_music] 發生例外:", e)
             import traceback
             traceback.print_exc()
             return JsonResponse({"error": str(e)}, status=500)
@@ -1174,7 +1175,7 @@ def generate(request):
         userId = data.get('user_id')
 
         coughlist_str = data.get('cough_path', None)
-        print("cough_path:", coughlist_str)
+        #print("cough_path:", coughlist_str)
         coughlist_path = [p for p in (coughlist_str.split('^') if coughlist_str else []) if p]
         coughlist = [
             Path(os.path.join(settings.MEDIA_ROOT, userId, 'cough_audio', p + '.wav'))
@@ -1182,33 +1183,33 @@ def generate(request):
         ]
         cough_length = len(coughlist_path)
         uuid_this = str(uuid.uuid4())
-        print(f'mode: {mode}, userId: {userId}, coughlist: {coughlist_path}')
+        #print(f'mode: {mode}, userId: {userId}, coughlist: {coughlist_path}')
 
         # Determine mode based on cough count and input flag
         if mode == 'co_create_trio':
             if cough_length == 1:
                 mode = 'trio'
-                print("[generate] mode set to trio (1 input)")
+                #print("[generate] mode set to trio (1 input)")
             elif 2<= cough_length <= 4:
                 mode = 'trio_manual'
-                print(f"[generate] mode set to trio_manual ({cough_length} inputs)")
+                #print(f"[generate] mode set to trio_manual ({cough_length} inputs)")
             else:
                 return JsonResponse({'error': 'Trio mode supports 2-4 cough inputs.'}, status=400)
-            print('------------')
+            #print('------------')
         elif mode == 'co_create_drum':
             # if cough_length == 1:
             #     mode = 'drum'
             if 1 <= cough_length <= 6:
                 # Auto-fill up to 7 in GenerateJob class later
                 mode = 'drum'
-                print(f"[generate] mode set to drum_autofill ({cough_length} inputs)")
+                #print(f"[generate] mode set to drum_autofill ({cough_length} inputs)")
             elif cough_length == 7:
                 mode = 'drum_manual'
-                print("[generate] mode set to drum_manual (7 inputs)")
+                #print("[generate] mode set to drum_manual (7 inputs)")
             else:
                 return JsonResponse({'error': 'Drum mode supports 1-7 cough inputs.'}, status=400)
 
-        print(f"[generate] mode: {mode}, userId: {userId}, coughlist: {coughlist_path}")
+        #print(f"[generate] mode: {mode}, userId: {userId}, coughlist: {coughlist_path}")
         job = GenerateJob(mode, data, uuid_this, userId, coughlist)
         generate_task_queue.put(job)
         task_progress[uuid_this] = job
@@ -1222,14 +1223,24 @@ def generate(request):
 
 @csrf_exempt
 def generate_status_view(request):
-    data = json.loads(request.body.decode("utf-8"))
+    #print("[generate_status_view] called")
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        #print("[generate_status_view] request data:", data)
+    except Exception as e:
+        #print("[generate_status_view] JSON decode error:", e)
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
     uuid = data.get('uuid')
     userId = data.get('userId')
+    #print("[generate_status_view] uuid:", uuid, "userId:", userId)
     
     # 如果有指定 uuid，返回該 uuid 的狀態
     if uuid:
         job = task_progress.get(uuid, None)
+        #print("[generate_status_view] job from task_progress:", job)
         if job:
+            #print("[generate_status_view] found job, returning status")
             return JsonResponse({
                 'uuid': job.uuid,
                 'mode': job.mode,
@@ -1238,16 +1249,20 @@ def generate_status_view(request):
                 'status': job.status,
                 'result': job.result if job.status == 'completed' else None
             }, status=200)
+        #print("[generate_status_view] UUID not found")
         return JsonResponse({'error': 'UUID not found'}, status=404)
 
     # 過濾 function
     def filter_by_user(jobs):
         if userId:
-            return [job for job in jobs if getattr(job, 'user_id', None) == userId]
+            filtered = [job for job in jobs if getattr(job, 'user_id', None) == userId]
+            #print(f"[generate_status_view] filter_by_user: {len(filtered)} jobs for user {userId}")
+            return filtered
+        #print(f"[generate_status_view] filter_by_user: return all {len(jobs)} jobs")
         return list(jobs)
     
-
     # 如果有指定 user_id，返回該 user_id 的所有 queue、processing 和 completed 的物件
+    #print("[generate_status_view] checking queued jobs")
     queued_jobs = [
         {
             'uuid': job.uuid,
@@ -1260,7 +1275,9 @@ def generate_status_view(request):
         }
         for job in filter_by_user(generate_task_queue.queue)
     ]
+    #print(f"[generate_status_view] queued_jobs: {len(queued_jobs)}")
 
+    #print("[generate_status_view] checking processing jobs")
     processing_jobs_status = [
         {
             'uuid': job.uuid,
@@ -1272,7 +1289,9 @@ def generate_status_view(request):
         }
         for job in filter_by_user(processing_jobs)
     ]
+    #print(f"[generate_status_view] processing_jobs_status: {len(processing_jobs_status)}")
 
+    #print("[generate_status_view] checking completed jobs")
     completed_jobs_status = [
         {
             'uuid': job.uuid,
@@ -1284,6 +1303,8 @@ def generate_status_view(request):
         }
         for job in filter_by_user(completed_jobs)
     ]
+    #print(f"[generate_status_view] completed_jobs_status: {len(completed_jobs_status)}")
 
     all_jobs = queued_jobs + processing_jobs_status + completed_jobs_status
+    #print(f"[generate_status_view] all_jobs count: {len(all_jobs)}")
     return JsonResponse(all_jobs, safe=False, status=200)

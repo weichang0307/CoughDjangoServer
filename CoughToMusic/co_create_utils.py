@@ -1,22 +1,36 @@
 import sys
 from pathlib import Path
 import os
-import django
 import shutil
 import datetime
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(BASE_DIR))
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'CoughToMusicDjango.settings')
-django.setup()
-from django.conf import settings
+# Only setup Django if NOT running in worker mode
+if not os.environ.get("COUGH_WORKER"):
+    import django
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "CoughToMusicDjango.settings")
+    django.setup()
+    from django.conf import settings
+else:
+    settings = None  # placeholder, so imports below don't break
+
+# Now import your project libs
 from .cocreate.lib import cough2mid
 from .cocreate.lib.calculate_similarity.generate_order import generate_midi_sequence
-from .cocreate.lib.generation import generate_melody_from_sequence, generate_humanize_groove, interpolated_groove,path_to_note_seq, concatenate_sequences, concate_interpolation
-# from .cocreate.lib.timbre_synthesize import generate_trio , save_audio
+from .cocreate.lib.generation import (
+    generate_melody_from_sequence,
+    generate_humanize_groove,
+    interpolated_groove,
+    path_to_note_seq,
+    concatenate_sequences,
+    concate_interpolation,
+)
 from .cocreate.lib.drum import *
 from .cocreate.lib import midi
 import soundfile as sf
+
 
 # from cocreate.lib.audio import pedalboard_process
 MEL_CONFIG = {
@@ -210,7 +224,17 @@ def cough2mid_manual(cough_pth, usr_folder, mid_dic, sample_rate=16000):
 def gen_trio_mid(id):
     tracks = ['mel', 'acc', 'bass']
     mel_mtf = id_to_pth(id, 'mel', 'mtf')
-    sequence = generate_midi_sequence(mel_mtf, settings.MOTIF_MEL_MID)
+    # sequence = generate_midi_sequence(mel_mtf, settings.MOTIF_MEL_MID)
+    # --- Start Randomly select two other IDs from the motif folder ---
+    motif_folder = settings.MOTIF_MEL_MID
+    midi_files = [f for f in os.listdir(motif_folder) if f.endswith('.mid')]
+    target_filename = os.path.basename(mel_mtf)
+    midi_files = [f for f in midi_files if f != target_filename]
+    selected = random.sample(midi_files, 2)
+    def extract_id(filename):
+        return int(filename.replace("mel_", "").replace(".mid", ""))
+    sequence = [id] + [extract_id(f) for f in selected]
+   # --- End Randomly select two other IDs from the motif folder --- 
     print(f"MIDI sequence: {sequence}")
     for trk in tracks:
         sequence_pth =[id_to_pth(id, trk, 'mtf') for id in sequence]

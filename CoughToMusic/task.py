@@ -109,26 +109,7 @@ class GenerateJob:
                     'generated_music': generated_manual_trio
                 }
                 print(self.result)
-            # elif self.mode == 'drum':
-            #     user_id = self.data['user_id']
-            #     cough_path = str(self.coughlist[0])
-            #     uuid = self.uuid
-            #     time_value = os.path.splitext(os.path.basename(cough_path))[0]
-            #     user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_drum')
-            #     os.makedirs(user_tmp_folder, exist_ok=True)
 
-            #     cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
-            #     df = pd.read_csv(cough_table_path)
-            #     match = df[df['time'] == time_value]
-            #     pubCoughID = int(match.iloc[0]['pubCoughID'])
-
-            #     generate_path_drum, used_cough_paths = generate_groove_intp(
-            #         settings.PUBLIC_COUGH, pubCoughID, user_tmp_folder, uuid)
-            #     self.result = {
-            #         'cough_path':  [str(p) for p in self.coughlist],
-            #         'used_public_paths': [str(p) for p in used_cough_paths],
-            #         'generate_path_drum': generate_path_drum
-            #     }
             elif self.mode == 'drum_manual':
                 user_id = self.data['user_id']
                 cough_path = self.data['cough_path']
@@ -161,11 +142,7 @@ class GenerateJob:
                         user_tmp_folder,
                         uuid
                     )
-                    print('cough_paths', [str(p) for p in self.coughlist])
-                    print('cough_motifs',[os.path.join(settings.BASE_DIR, str(p)) for p in drum_motif_wavs[:len(self.coughlist)]])
-                    
-                    print('used_public_paths', [str(p) for p in used_public_paths])
-                    print('used_motif_paths', [os.path.join(settings.BASE_DIR, str(p)) for p in drum_motif_wavs[len(self.coughlist):]])
+                  
                     self.result = {
                         'cough_paths': [str(p) for p in self.coughlist],
                         'cough_motifs': [str(p) for p in drum_motif_wavs[:len(self.coughlist)]],
@@ -194,35 +171,3 @@ class GenerateJob:
             # 確保更新 task_progress
             task_progress[self.uuid] = self
 
-
-#test用的
-
-
-
-# # 模擬使用者 ID 和 cough input 路徑
-# user_id = 'jag22325477@gapp.nthu.edu.tw'
-# test_uuid = "gg"
-# # 假設你有兩段使用者上傳的咳嗽
-# user_cough_paths = [
-#     # os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', '2025-07-02-23-50-22.wav'),
-#     os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', '2025-07-02-23-50-38.wav')
-# ]
-# data = {
-#     'user_id': user_id
-# }
-# Mode = 'drum'  # 可以是 'normal', 'trio', 'drum', 'trio_manual', 'drum_manual', 'drum_autofill'
-# # 建立一個 autofill job
-# job = GenerateJob(
-#     mode=Mode,
-#     data=data,
-#     uuid=test_uuid,
-#     user_id=user_id,
-#     coughlist=user_cough_paths,
-# )
-# print(f"🛠 測試開始 UUID: {test_uuid}")
-# job.run()
-# print(f"✅ 狀態: {job.status}")
-# print(f"⏱ 執行時間: {job.duration} 秒")
-# print(f"📦 回傳資料:\n{job.result}")
-
-# save_music_move(user_id, test_uuid, "gg",Mode)
