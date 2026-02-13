@@ -17,7 +17,7 @@ class GenerateJob:
         self.mode = mode
         self.data = data
         self.uuid = uuid
-        self.type = data.get('type', 'normal')
+        #self.type = data.get('type', 'normal')
         self.time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())  # 記錄創建時間
         self.duration = None  # 執行時長
         self.status = 'queued'  # 初始狀態為 queued

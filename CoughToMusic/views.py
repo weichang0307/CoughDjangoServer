@@ -120,6 +120,9 @@ def set_template(request):
         latitude = metadata_dict.get('latitude')
         longitude = metadata_dict.get('longitude')
         time = filename
+
+
+        
         
         # 設定文件名路徑
         filename = os.path.join('', filename + '.wav')
@@ -165,8 +168,10 @@ def create_cough_audio(request):
         userid = metadata_dict.get('userId')
         filename = metadata_dict.get('fileName')
         latitude = metadata_dict.get('latitude')
+        mode = metadata_dict.get('mode')
         longitude = metadata_dict.get('longitude')
         time = filename
+
         
         # 設定文件名路徑
         filename = os.path.join('', filename + '.wav')
@@ -290,7 +295,20 @@ def create_cough_audio(request):
                 update_cough_table(userid, cough_table_data)
                 sf.write(os.path.join(folder_path_public, f'{pubCoughID}.wav'), classification_result['non_user_output'], classification_result['sample_rate'])
 
-            return JsonResponse({'IsSaving':'true','message': 'Audio data received successfully.'}, status=200)
+
+            if mode == "realtime":
+                data = {"user_id":userid, "bass": "tuba", "alto":"clarinet", "high":"flute"} 
+                uuid_this = str(uuid.uuid4())
+                coughlist = [file_path]
+                job = GenerateJob("normal", data, uuid_this, userid, coughlist)
+                generate_task_queue.put(job)
+                task_progress[uuid_this] = job
+                return JsonResponse({'uuid':uuid_this}, status=200)
+
+            else:
+                return JsonResponse({'IsSaving':'true','message': 'Audio data received successfully.'}, status=200)
+            
+            
         
         else:
             # 如果是假咳嗽，則不儲存音訊檔案
@@ -1189,23 +1207,17 @@ def generate(request):
         if mode == 'co_create_trio':
             if cough_length == 1:
                 mode = 'trio'
-                #print("[generate] mode set to trio (1 input)")
             elif 2<= cough_length <= 4:
                 mode = 'trio_manual'
-                #print(f"[generate] mode set to trio_manual ({cough_length} inputs)")
             else:
                 return JsonResponse({'error': 'Trio mode supports 2-4 cough inputs.'}, status=400)
             #print('------------')
         elif mode == 'co_create_drum':
-            # if cough_length == 1:
-            #     mode = 'drum'
             if 1 <= cough_length <= 6:
                 # Auto-fill up to 7 in GenerateJob class later
                 mode = 'drum'
-                #print(f"[generate] mode set to drum_autofill ({cough_length} inputs)")
             elif cough_length == 7:
                 mode = 'drum_manual'
-                #print("[generate] mode set to drum_manual (7 inputs)")
             else:
                 return JsonResponse({'error': 'Drum mode supports 1-7 cough inputs.'}, status=400)
 
@@ -1223,6 +1235,7 @@ def generate(request):
 
 @csrf_exempt
 def generate_status_view(request):
+
     #print("[generate_status_view] called")
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -1308,3 +1321,60 @@ def generate_status_view(request):
     all_jobs = queued_jobs + processing_jobs_status + completed_jobs_status
     #print(f"[generate_status_view] all_jobs count: {len(all_jobs)}")
     return JsonResponse(all_jobs, safe=False, status=200)
+
+@csrf_exempt
+def submit_survey(request):
+    if request.method == 'POST':
+        try:
+            metadata_dict = json.loads(request.body)
+            user_id = metadata_dict.get('userId')
+            filename = metadata_dict.get('fileName')
+            
+            if not user_id or not filename:
+                return JsonResponse({'error': 'Missing userId or fileName'}, status=400)
+
+            # 定義問卷記錄的欄位
+            columns = [
+                'timestamp', 'filename', 'source_type', 'source_detail', 
+                'selected_mode', 'thoughts', 'has_shared', 'share_details', 
+                'original_process_mode'
+            ]
+
+            user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
+            os.makedirs(user_folder, exist_ok=True)
+            survey_table_path = os.path.join(user_folder, 'survey_table.csv')
+
+            # 處理可能為巢狀字典的 source_detail，將其轉為 JSON 字串以便存入單一 CSV 欄位
+            source_detail = metadata_dict.get('source_detail', '')
+            if isinstance(source_detail, (dict, list)):
+                source_detail = json.dumps(source_detail, ensure_ascii=False)
+
+            row_data = {
+                'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'filename': filename,
+                'source_type': metadata_dict.get('source_type', ''),
+                'source_detail': source_detail,
+                'selected_mode': metadata_dict.get('selected_mode', ''),
+                'thoughts': metadata_dict.get('thoughts', ''),
+                'has_shared': metadata_dict.get('has_shared', ''),
+                'share_details': metadata_dict.get('share_details', ''),
+                'original_process_mode': metadata_dict.get('original_process_mode', '')
+            }
+
+            # 檢查檔案是否存在，以決定是否需要寫入標題列 (header)
+            file_exists = os.path.exists(survey_table_path)
+            
+            df = pd.DataFrame([row_data])
+            
+            if not file_exists:
+                df.to_csv(survey_table_path, index=False, columns=columns)
+            else:
+                df.to_csv(survey_table_path, mode='a', header=False, index=False, columns=columns)
+
+            return JsonResponse({'message': 'Survey submitted successfully.'}, status=200)
+
+        except Exception as e:
+            print("Error in submit_survey: ", e)
+            return JsonResponse({'error': str(e)}, status=400)
+    
+    return JsonResponse({'error': 'Invalid request method'}, status=400)

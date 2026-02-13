@@ -29,4 +29,5 @@ urlpatterns = [
     path('refresh_best_song/', views.refresh_best_song, name='refresh_best_song'),
     path('set_template/', views.set_template, name='set_template'),
     path('modify_clusterID/', views.modify_clusterID, name='modify_clusterID'),
+    path('submit_survey/', views.submit_survey, name='submit_survey')
 ]
