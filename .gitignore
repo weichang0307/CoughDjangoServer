@@ -2,6 +2,7 @@
 *.mid 
 tmp/
 tmp*/
+probe_media*/ 
 media/
 __pycache__/
 CoughToMusic/cocreate/model/
