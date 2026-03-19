@@ -10,6 +10,23 @@ from django.views.decorators.csrf import csrf_exempt
 from ..services.uploads import process_cough_upload, save_template_audio
 
 
+def _is_people_row(value):
+    if pd.isna(value):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return bool(value)
+
+
+def _serialize_cluster_id(value):
+    if pd.isna(value):
+        return None
+    try:
+        return str(int(float(value)))
+    except (TypeError, ValueError):
+        return str(value)
+
+
 @csrf_exempt
 def modify_clusterID(request):
     if request.method != "POST":
@@ -80,7 +97,13 @@ def get_coughs(request):
         audio_records = []
         metadata_dict = json.loads(request.body)
         user_id = metadata_dict.get("userId")
+        if not user_id:
+            return JsonResponse({"error": "Missing userId"}, status=400)
+
         upload_folder = os.path.join(settings.MEDIA_ROOT, user_id, "cough_audio")
+        if not os.path.isdir(upload_folder):
+            return JsonResponse([], safe=False, status=200)
+
         cough_table_path = os.path.join(upload_folder, "cough_table.csv")
         df = pd.read_csv(cough_table_path) if os.path.exists(cough_table_path) else None
 
@@ -103,10 +126,10 @@ def get_coughs(request):
             if df is not None:
                 match = df[df["filename"] == filename]
                 if not match.empty:
-                    cluster_id = str(int(match.iloc[0]["clusterID"]))
+                    cluster_id = _serialize_cluster_id(match.iloc[0].get("clusterID"))
                     people = match.iloc[0].get("people", None)
 
-            if people is False:
+            if not _is_people_row(people):
                 audio_records.append(
                     {
                         "filename": filename.replace(".wav", ""),

@@ -253,7 +253,7 @@ The model in `CoughToMusic/models.py` is not central to the main runtime flow.
 Standard Django entrypoint:
 
 ```powershell
-python manage.py runserver
+C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe manage.py runserver
 ```
 
 Repo helper:
@@ -269,13 +269,21 @@ This repo appears to depend on two Python environments:
 - main Django app environment from `environment.yml`
 - YAMNet worker environment from `k_yamnet.yml`
 
-Important caveats:
+Verified local paths in this repo:
 
-- `runserver.ps1` activates `env_itcough`
-- `environment.yml` declares an environment named `DjangoEnv2`
-- `CoughToMusicDjango/settings.py` hardcodes `YAMNET_PYTHON_EXE`
+- main app interpreter: `C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe`
+- worker interpreter: `C:\ProgramData\anaconda3\envs\k_yamnet\python.exe`
+- `environment.yml` declares the main env name as `DjangoEnv2`
+- `CoughToMusicDjango/settings.py` hardcodes `YAMNET_PYTHON_EXE` to the worker env path
+- `runserver.ps1` now launches Django with the `DjangoEnv2` interpreter directly
 
-That means environment setup is machine-specific and should be verified locally before assuming the project is portable as-is.
+Important Windows caveat:
+
+- this machine resolves bare `python` through a `pyenv` shim that does not point at the Django env
+- `conda` is not available on `PATH` in non-initialized shells
+- use the full conda env `python.exe` path for `manage.py` commands unless your shell has already been initialized correctly
+
+That means environment setup is still machine-specific and should be verified locally before assuming the project is portable as-is.
 
 ## Background Job Model
 
@@ -311,6 +319,14 @@ Automated coverage is still limited, but `CoughToMusic/tests.py` now includes re
 For most changes, real verification means exercising the relevant HTTP endpoints and inspecting the resulting files and CSV rows.
 
 Upload filtering now has request-level tests that mock the `run_cli(...)` seam to verify one failed upload does not poison the next request in the same Django process. The coverage includes failure on the initial user-file filter call and failure on the later public-copy filter call. The test suite also checks that helper imports do not eagerly load the heavy audio stack or generation helpers.
+
+Verified test command:
+
+```powershell
+C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe manage.py test CoughToMusic.tests
+```
+
+The upload tests intentionally create temporary media roots under `media/test_media_<uuid>/` instead of using Python's default `tempfile` directory creation. On this Windows setup, `tempfile`-created directories were not writable for child paths under the Django test process, while normal `os.makedirs(...)` paths under the repo were stable.
 
 ## Practical Advice For Contributors
 

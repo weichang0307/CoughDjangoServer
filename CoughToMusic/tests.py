@@ -1,9 +1,11 @@
 import csv
 import json
 import os
-import tempfile
 import subprocess
 import sys
+import shutil
+import uuid
+import wave
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -57,14 +59,19 @@ class RuntimeStartupTests(TestCase):
 class UploadFilterIsolationTests(TestCase):
     def setUp(self):
         super().setUp()
-        self._temp_media = tempfile.TemporaryDirectory(dir=settings.BASE_DIR)
-        self.addCleanup(self._temp_media.cleanup)
+        self._temp_media_path = os.path.join(
+            settings.BASE_DIR,
+            "media",
+            f"test_media_{uuid.uuid4().hex}",
+        )
+        os.makedirs(self._temp_media_path, exist_ok=False)
+        self.addCleanup(lambda: shutil.rmtree(self._temp_media_path, ignore_errors=True))
 
-        self._override = override_settings(MEDIA_ROOT=self._temp_media.name)
+        self._override = override_settings(MEDIA_ROOT=self._temp_media_path)
         self._override.enable()
         self.addCleanup(self._override.disable)
 
-        os.makedirs(os.path.join(self._temp_media.name, "public_cough"), exist_ok=True)
+        os.makedirs(os.path.join(self._temp_media_path, "public_cough"), exist_ok=True)
 
         self.user_id = "jay"
         self._sign_up_user()
@@ -115,7 +122,7 @@ class UploadFilterIsolationTests(TestCase):
 
     def _cough_table_path(self):
         return os.path.join(
-            self._temp_media.name,
+            self._temp_media_path,
             self.user_id,
             "cough_audio",
             "cough_table.csv",
@@ -123,7 +130,7 @@ class UploadFilterIsolationTests(TestCase):
 
     def _wav_path(self, stem):
         return os.path.join(
-            self._temp_media.name,
+            self._temp_media_path,
             self.user_id,
             "cough_audio",
             f"{stem}.wav",
@@ -176,7 +183,7 @@ class UploadFilterIsolationTests(TestCase):
         ), patch("CoughToMusic.services.uploads.clustering", return_value=7):
             failed_response = self._upload_audio("first")
             self.assertEqual(failed_response.status_code, 400)
-            self.assertIn("forced worker failure", failed_response.content.decode())
+            self.assertIn("forced filter worker failure", failed_response.content.decode().lower())
             self.assertTrue(os.path.exists(self._wav_path("first")))
             self.assertEqual(self._read_cough_rows(), [])
 
@@ -229,7 +236,7 @@ class UploadFilterIsolationTests(TestCase):
         ), patch("CoughToMusic.services.uploads.clustering", return_value=7):
             failed_response = self._upload_audio("public-first")
             self.assertEqual(failed_response.status_code, 400)
-            self.assertIn("forced public filter worker failure", failed_response.content.decode())
+            self.assertIn("forced public filter worker failure", failed_response.content.decode().lower())
             self.assertTrue(os.path.exists(self._wav_path("public-first")))
             self.assertEqual(self._read_cough_rows(), [])
 
@@ -242,6 +249,55 @@ class UploadFilterIsolationTests(TestCase):
         self.assertEqual(rows[0]["filename"], "public-second.wav")
         self.assertEqual(rows[0]["clusterID"], "7")
         self.assertEqual(call_state["count"], 4)
+
+    def test_get_coughs_returns_rows_when_people_column_is_false_string(self):
+        cough_dir = os.path.join(self._temp_media_path, self.user_id, "cough_audio")
+        wav_path = os.path.join(cough_dir, "listed.wav")
+        with wave.open(wav_path, "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(16000)
+            handle.writeframes(self._pcm16_bytes())
+
+        with open(self._cough_table_path(), "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=[
+                    "filename",
+                    "timestamp",
+                    "pubCoughID",
+                    "time",
+                    "latitude",
+                    "longitude",
+                    "clusterID",
+                    "people",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "filename": "listed.wav",
+                    "timestamp": "2026-03-20 00:00:00",
+                    "pubCoughID": "-1",
+                    "time": "listed",
+                    "latitude": "0",
+                    "longitude": "0",
+                    "clusterID": "3",
+                    "people": "False",
+                }
+            )
+
+        response = self.client.post(
+            reverse("get_coughs"),
+            data=json.dumps({"userId": self.user_id}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content.decode())
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["filename"], "listed")
+        self.assertEqual(payload[0]["clusterID"], "3")
 
 
 class GenerationRuntimeTests(TestCase):

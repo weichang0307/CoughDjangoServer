@@ -215,6 +215,7 @@ For rename/delete changes:
 Be skeptical of existing tests:
 
 - `CoughToMusic/tests.py` now includes request-level coverage for failed-then-successful upload behavior around the filter wrapper
+- `CoughToMusic/tests.py` uses repo-local `media/test_media_<uuid>/` scratch directories for upload tests because Python `tempfile` directories were not writable for nested paths under the Windows Django test process in this workspace
 - `test.py` appears stale
 
 ## Environment Notes
@@ -223,9 +224,11 @@ Current repo reality:
 
 - `environment.yml` defines the main app environment
 - `k_yamnet.yml` defines the worker environment
-- `runserver.ps1` activates `env_itcough`
 - `environment.yml` says `DjangoEnv2`
-- `settings.py` hardcodes the worker interpreter path
+- `settings.py` hardcodes the worker interpreter path as `C:\ProgramData\anaconda3\envs\k_yamnet\python.exe`
+- `runserver.ps1` launches `manage.py runserver` with `C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe`
+- on this machine, bare `python` may resolve to a `pyenv` shim and `conda` may not be on `PATH`
+- for reliable local verification, prefer direct interpreter invocations such as `C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe manage.py test CoughToMusic.tests`
 
 Do not "clean this up" as a side effect of another task unless requested.
 
