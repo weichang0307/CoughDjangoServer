@@ -1,15 +1,12 @@
 import os
 from django.conf import settings
-from .lib import cough, Fake_cough_filter, cough_cluster, filter, filter_template
 import wave
 import shutil
 import datetime
 import io
-import librosa
-import soundfile as sf
-import librosa
 from .table import update_music_table
 import numpy as np
+from .utils.runner import run_cli
 
 
 def save_pcm16_to_wav(filename, data, rate):
@@ -35,6 +32,8 @@ def save_wav_with_resample(filename, data, target_rate=16000):
     """自動偵測並轉換 sample rate，保存音頻數據到 WAV 文件。"""
     try:
         # 讀取 bytes 為 numpy array，sr=None 代表用原始 sample rate
+        import librosa
+        import soundfile as sf
         y, sr = librosa.load(io.BytesIO(data), sr=None, mono=True)
         if sr != target_rate:
             y = librosa.resample(y, orig_sr=sr, target_sr=target_rate)
@@ -45,6 +44,8 @@ def save_wav_with_resample(filename, data, target_rate=16000):
 
   
 def generate_music(user_id, cough_path, filename, bass_music = "tuba", alto_music = "clarinet", high_music = "flute", sample_rate = 16000):
+    from .lib import cough
+
    
     user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
     # temp改成和cocreate一樣的temp資料夾
@@ -268,19 +269,40 @@ def init_user_folder(user_id):
 
 
 def fake_cough_dist(cough_path, sample_rate=16000):
+    from .lib import Fake_cough_filter
+    import librosa
+
     audio_data, sr = librosa.load(cough_path, sr=sample_rate)
     result = Fake_cough_filter.detect_inhale(audio_data, sr)
     return result
 
 
 def filter_coughs(audio_path):
-    filter.process_audio(audio_path)
+    payload = {
+        "mode": "filter",
+        "audio_path": audio_path,
+        "write_mode": "mask",
+        "apply_energy_gate": True,
+    }
+    res = run_cli(
+        python_exe=settings.YAMNET_PYTHON_EXE,
+        entry_py=os.path.join(settings.BASE_DIR, "CoughToMusic", "yamnet_worker", "run_yamnet_worker.py"),
+        payload=payload,
+        cwd=str(settings.BASE_DIR),
+        enable_log=False,
+    )
+    if not res["ok"]:
+        worker_error = res.get("error") or "Filter worker failed"
+        worker_stdout = (res.get("stdout") or "").strip()
+        worker_stderr = (res.get("stderr") or "").strip()
+        details = " | ".join([part for part in [worker_error, worker_stdout or None, worker_stderr or None] if part])
+        raise RuntimeError(f"filter_coughs failed: {details}")
+    return res.get("json")
 
 def filter_coughs_template(audio_path):
+    from .lib import filter_template
+
     filter_template.process_audio(audio_path)
-    
-    
-from .utils.runner import run_cli
 
 def classify_cough_event(cough_wav_path, user_data_path, template_data_path, strict_mode=True):
     payload = {

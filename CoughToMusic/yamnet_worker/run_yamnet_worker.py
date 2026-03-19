@@ -39,10 +39,18 @@ def main():
             )
             res = {"cluster_id": cluster_id}  # ✅ 包裝成字典
         elif mode == "filter":
+            if payload.get("force_error", False):
+                raise RuntimeError(payload.get("force_error_message") or "Forced filter worker failure")
+
             res = process_audio(
                 audio_path=payload["audio_path"],
+                sample_rate=payload.get("sample_rate"),
                 write_mode=payload.get("write_mode", "mask"),
-                apply_energy_gate=payload.get("apply_energy_gate", True)
+                out_dir=payload.get("out_dir"),
+                keep_gain=payload.get("keep_gain", 0.9),
+                apply_energy_gate=payload.get("apply_energy_gate", True),
+                force_error=payload.get("force_error", False),
+                force_error_message=payload.get("force_error_message")
             )
         else:
             raise ValueError(f"Unknown mode: {mode}")

@@ -91,8 +91,20 @@ def _energy_gate(y, sr, segments, percentile=ENERGY_PERCENTILE, frame_ms=ENERGY_
 
 
 
-def process_audio(audio_path, sample_rate=None, write_mode="mask", out_dir=None, keep_gain=0.9, apply_energy_gate=True):
+def process_audio(
+    audio_path,
+    sample_rate=None,
+    write_mode="mask",
+    out_dir=None,
+    keep_gain=0.9,
+    apply_energy_gate=True,
+    force_error=False,
+    force_error_message=None,
+):
     # --- 使用 soundfile 載入 ---
+    if force_error:
+        raise RuntimeError(force_error_message or "Forced filter worker failure")
+
     audio, orig_sr = sf.read(audio_path)
     if audio.ndim > 1:
         audio = audio.mean(axis=1)  # 若為立體聲，轉成單聲道

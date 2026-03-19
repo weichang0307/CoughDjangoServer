@@ -25,7 +25,9 @@ Do not treat this like a typical ORM-centered Django app. For most meaningful fl
 
 Core request flow:
 
-- `CoughToMusic/views.py`
+- `CoughToMusic/views/`
+- `CoughToMusic/services/`
+- `CoughToMusic/runtime/`
 - `CoughToMusic/urls.py`
 - `CoughToMusicDjango/urls.py`
 
@@ -64,7 +66,7 @@ User initialization:
 Upload and analysis:
 
 - `create_cough_audio` writes the uploaded WAV early
-- then filters the file
+- then filters the file through the subprocess worker boundary
 - then classifies and clusters it
 - then appends rows to `cough_table.csv`
 
@@ -72,8 +74,8 @@ Generation:
 
 - `generate` converts request data into a `GenerateJob`
 - jobs are queued in-process
-- a daemon thread starts from `views.py` import-time code
-- `GenerateJob.run()` performs mode-specific generation
+- the runtime layer starts a daemon thread lazily on first generation use
+- `GenerateJob.run()` delegates mode-specific generation to `CoughToMusic/services/generation_modes.py`
 
 Finalize:
 
@@ -119,7 +121,7 @@ This project does not use a durable job runner.
 
 Current behavior:
 
-- queue is an in-process `Queue`
+- queue is an in-process `Queue` owned by the runtime layer
 - worker count is effectively one thread
 - job status is tracked in Python lists and dicts
 - a server restart drops queued and completed job state
@@ -132,11 +134,11 @@ Implications for agents:
 
 ## Worker Boundary
 
-Classification and clustering cross a subprocess boundary.
+Filtering, classification, and clustering cross a subprocess boundary.
 
 Important facts:
 
-- `util.py` calls `run_cli(...)`
+- `util.py` calls `run_cli(...)` for the worker-backed filter/classify/cluster helpers
 - `run_cli` launches a separate Python interpreter
 - the worker script is `CoughToMusic/yamnet_worker/run_yamnet_worker.py`
 - `YAMNET_PYTHON_EXE` is hardcoded in `settings.py`
@@ -158,17 +160,19 @@ This code has little transactional protection. Preserve current flow unless the 
 
 Usually safe when scoped and verified:
 
-- response shaping in `CoughToMusic/views.py`
+- response shaping in `CoughToMusic/views/`
 - CSV field handling in `CoughToMusic/table.py`
+- orchestration helpers in `CoughToMusic/services/`
+- runtime lifecycle helpers in `CoughToMusic/runtime/`
 - path and save/move rules in `CoughToMusic/util.py`
-- mode-specific generation in `CoughToMusic/task.py`
+- mode-specific generation in `CoughToMusic/services/generation_modes.py`
 - co-create generation helpers in `CoughToMusic/co_create_utils.py`
 
 Higher risk:
 
 - `create_cough_audio`
 - `save_music_move`
-- queue startup and lifecycle in `views.py`
+- queue startup and lifecycle in `CoughToMusic/runtime/`
 - subprocess bridge in `util.py` and `utils/runner.py`
 - path definitions in `settings.py`
 
@@ -182,7 +186,7 @@ Before changing any flow, answer these questions:
 4. Does the flow cross the YAMNet subprocess boundary?
 5. Is the output temporary or finalized?
 
-If you cannot answer those quickly, read the relevant path through `views.py`, `util.py`, and `table.py` first.
+If you cannot answer those quickly, read the relevant path through the controller layer, `util.py`, and `table.py` first.
 
 ## Verification Expectations
 
@@ -192,6 +196,9 @@ For upload changes:
 
 - confirm the WAV lands in the expected user folder
 - confirm `cough_table.csv` reflects the intended row state
+- confirm a failed filter request does not poison the next upload in the same Django process
+- prefer request-level tests that fail once and then succeed on a second upload, ideally at the `run_cli(...)` seam if full worker execution is impractical in tests
+- prefer startup probes that verify helper imports do not eagerly load the heavy audio stack or generation helpers
 
 For generation changes:
 
@@ -199,6 +206,7 @@ For generation changes:
 - confirm status polling still reports usable information
 - confirm temp output is created
 - confirm final save moves output into the expected permanent folder
+- confirm runtime startup stays lazy until generation is first requested
 
 For rename/delete changes:
 
@@ -206,7 +214,7 @@ For rename/delete changes:
 
 Be skeptical of existing tests:
 
-- `CoughToMusic/tests.py` is a stub
+- `CoughToMusic/tests.py` now includes request-level coverage for failed-then-successful upload behavior around the filter wrapper
 - `test.py` appears stale
 
 ## Environment Notes
@@ -237,4 +245,6 @@ Think of the app as:
 - `media/` as the datastore
 - CSV files as metadata tables
 - background generation as a local queue
+- runtime helpers as the owner of lazy queue startup and in-memory job state
 - YAMNet analysis as a subprocess service
+- heavy audio and generation dependencies should stay lazily imported where practical so lightweight endpoints and tests are not blocked by module-load cost

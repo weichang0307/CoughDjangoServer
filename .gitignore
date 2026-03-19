@@ -1,6 +1,7 @@
 *.wav
 *.mid 
 tmp/
+tmp*/
 media/
 __pycache__/
 CoughToMusic/cocreate/model/

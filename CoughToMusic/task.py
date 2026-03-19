@@ -1,15 +1,9 @@
-import os
-import pandas as pd
-from django.conf import settings
-import os
-from .util import generate_music, save_music_move
-from .co_create_utils import gen_trio_mid, cough2midi, gen_trio_trk, generate_groove_intp_autofill, cough2mid_manual, gen_trio_manual,gen_trio_trk_manual,  generate_groove_intp_manual
-from django.conf import settings
-import pandas as pd
 import time
-from pathlib import Path
+
+from .services.generation_modes import execute_generation_mode
 
 task_progress = {}
+
 
 class GenerateJob:
     def __init__(self, mode, data, uuid, user_id, coughlist):
@@ -17,157 +11,24 @@ class GenerateJob:
         self.mode = mode
         self.data = data
         self.uuid = uuid
-        #self.type = data.get('type', 'normal')
-        self.time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())  # 記錄創建時間
-        self.duration = None  # 執行時長
-        self.status = 'queued'  # 初始狀態為 queued
-        self.result = None  # 儲存結果或錯誤訊息
+        self.time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        self.duration = None
+        self.status = "queued"
+        self.result = None
         self.coughlist = coughlist
-
-        # cough_path = data.get('cough_path', None) + ".wav"
-        # self.file_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', cough_path)
         self.file_path = str(coughlist[0]) if coughlist else None
-        print(f'self_file_path: {self.file_path}')
-
+        print(f"self_file_path: {self.file_path}")
 
     def run(self):
         try:
-            # 更新狀態為 processing
-            self.status = 'processing'
-            task_progress[self.uuid] = self  # 將整個物件存入 task_progress
-            start_time = time.time()  # 記錄開始時間
-
-            # 根據 mode 執行不同的邏輯
-            if self.mode == 'normal':
-                generate_path = generate_music(
-                    self.data['user_id'],
-                    self.file_path,
-                    self.uuid,
-                    self.data['bass'].lower(),
-                    self.data['alto'].lower(),
-                    self.data['high'].lower()
-                )
-
-                self.result = {'generate_path': generate_path, 'cough_paths':  [str(p) for p in self.coughlist]}
-
-            elif self.mode == 'trio':
-                print("----------trio mode----------")
-                user_id = self.data['user_id']
-                print(self.coughlist[0])
-                cough_path = str(self.coughlist[0])
-                print(f"cough_path: {cough_path}")
-                print(f"----------cough_path_trio_1: {cough_path}")
-                uuid = self.uuid
-                filename = os.path.splitext(os.path.basename(cough_path))[0]
-                print(f"filename: {filename}")
-                user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_trio')
-                os.makedirs(user_tmp_folder, exist_ok=True)
-                
-                cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, 'cough_audio', 'cough_table.csv')
-                df = pd.read_csv(cough_table_path)
-                match = df[df['filename'] == filename+'.wav']
-                pubCoughID = int(match.iloc[0]['pubCoughID'])
-                print(f"pubCoughID: {pubCoughID}")
-                generate_path_triomotif = Path(cough2midi(pubCoughID, 'string', user_tmp_folder, uuid, sample_rate=16000))
-
-                print('----generrate_trio_mid----')
-                used_cough_paths, used_motif_paths = gen_trio_mid(pubCoughID)  
-                print('----generrate_trio_trk----')
-                print('cough_paths',  [str(p) for p in self.coughlist])
-                print('cough_motifs',[str(generate_path_triomotif)])
-                print('used_public_paths', [str(p) for p in used_cough_paths])
-                print('used_motif_paths', [str(p) for p in used_motif_paths])
-                generate_path_trio = gen_trio_trk(pubCoughID, 'string', user_tmp_folder, uuid, sample_rate=16000)
-                self.result = {
-                    'cough_paths':  [str(p) for p in self.coughlist],
-                    'cough_motifs': [str(generate_path_triomotif)],
-                    'used_public_paths': [str(p) for p in used_cough_paths],
-                    'used_motif_paths': [str(p) for p in used_motif_paths],
-                    'generated_music': generate_path_trio
-                }
-                print(self.result)
-
-            elif self.mode == 'trio_manual':
-                user_id = self.data['user_id']
-                uuid = self.uuid
-                user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_manual_trio')
-                os.makedirs(user_tmp_folder, exist_ok=True)
-                mid_dic = {'mel':[], 'acc':[], 'bass':[]}
-                merged_trio_motif_wavs = []
-                for filename in self.coughlist:
-                    trio_wav = cough2mid_manual(filename, user_tmp_folder, mid_dic)
-                    merged_trio_motif_wavs.append(trio_wav)
-                print('----generate_trio_mid_manual----')
-                gen_trio_manual(user_tmp_folder, mid_dic, uuid)
-                print('----generate_trio_trk_manual----')
-                generated_manual_trio = gen_trio_trk_manual(user_tmp_folder, uuid, sample_rate=16000)
-                print('cough_paths', [str(p) for p in self.coughlist])
-                print('cough_motifs', [str(p) for p in merged_trio_motif_wavs])
-                self.result = {
-                    'cough_paths': [str(p) for p in self.coughlist],                  
-                    'cough_motifs': [str(p) for p in merged_trio_motif_wavs],
-                    'generated_music': generated_manual_trio
-                }
-                print(self.result)
-
-            elif self.mode == 'drum_manual':
-                user_id = self.data['user_id']
-                cough_path = self.data['cough_path']
-                uuid = self.uuid
-                filename = os.path.splitext(os.path.basename(cough_path))[0]
-                user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_manual_drum')
-                os.makedirs(user_tmp_folder, exist_ok=True)
-                # final_manual_dir = os.path.join(settings.MEDIA_ROOT, user_id, 'generated_manual_drum')
-                # os.makedirs(final_manual_dir, exist_ok=True)
-                generated_manual_drum,  drum_motif_wavs= generate_groove_intp_manual(self.coughlist, user_tmp_folder, uuid)
-                print('cough_paths', [str(p) for p in self.coughlist])
-                print('cough_motifs', [str(p) for p in drum_motif_wavs])
-                self.result = { 
-                    'cough_paths': [str(p) for p in self.coughlist],
-                    'cough_motifs': [os.path.join(settings.BASE_DIR, str(p)) for p in drum_motif_wavs],
-                    'generated_music': generated_manual_drum
-                }
-                print(self.result)
-
-            elif self.mode == 'drum':
-                user_id = self.data['user_id']
-                uuid = self.uuid
-                user_tmp_folder = os.path.join(settings.MEDIA_ROOT, user_id, 'temp_autofill_drum')
-                os.makedirs(user_tmp_folder, exist_ok=True)
-                public_base = os.path.abspath(settings.PUBLIC_COUGH)
-                try:
-                    generate_path_drum, used_public_paths, drum_motif_wavs = generate_groove_intp_autofill(
-                        self.coughlist,
-                        settings.PUBLIC_COUGH,
-                        user_tmp_folder,
-                        uuid
-                    )
-                  
-                    self.result = {
-                        'cough_paths': [str(p) for p in self.coughlist],
-                        'cough_motifs': [str(p) for p in drum_motif_wavs[:len(self.coughlist)]],
-                        'used_public_paths':[
-                            str(p) for p in used_public_paths
-                            if os.path.abspath(p).startswith(public_base)
-                        ],
-                        'used_motif_paths': [os.path.join(settings.BASE_DIR, str(p)) for p in drum_motif_wavs[len(self.coughlist):]],
-                        'generated_music': generate_path_drum,
-                    }
-                    print(self.result)
-                except Exception as e:
-                    self.result = {'error': str(e)}
-
-            else:
-                raise ValueError(f"Unsupported mode: {self.mode}")          
-            # 計算執行時長並更新狀態
-            self.duration = round(time.time() - start_time, 2)
-            self.status = 'completed'
-                
-        except Exception as e:
-            # 異常處理
-            self.status = 'failed'
-            self.result = {'error': str(e)}
-        finally:
-            # 確保更新 task_progress
+            self.status = "processing"
             task_progress[self.uuid] = self
-
+            start_time = time.time()
+            self.result = execute_generation_mode(self)
+            self.duration = round(time.time() - start_time, 2)
+            self.status = "completed"
+        except Exception as exc:
+            self.status = "failed"
+            self.result = {"error": str(exc)}
+        finally:
+            task_progress[self.uuid] = self

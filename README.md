@@ -35,7 +35,9 @@ Main Django project:
 Main app:
 
 - `CoughToMusic/urls.py`
-- `CoughToMusic/views.py`
+- `CoughToMusic/views/`
+- `CoughToMusic/services/`
+- `CoughToMusic/runtime/`
 - `CoughToMusic/util.py`
 - `CoughToMusic/task.py`
 - `CoughToMusic/table.py`
@@ -53,12 +55,12 @@ The main flow is:
 1. A client calls `sign_up` to initialize the user folder and CSV files.
 2. A client uploads cough audio through `create_cough_audio`.
 3. The server writes the uploaded audio to `media/<user>/cough_audio/<name>.wav`.
-4. The server filters the cough audio.
-5. The server runs cough classification and clustering.
+4. The server filters the cough audio through the YAMNet subprocess worker.
+5. The server runs cough classification and clustering through the same worker boundary.
 6. The server appends metadata to `cough_table.csv`.
-7. If music generation is requested, the server enqueues a background `GenerateJob`.
-8. The background worker writes temporary generated outputs under the user folder.
-9. The client polls `generate_status_view`.
+7. If music generation is requested, the controller hands the request to the in-memory runtime queue.
+8. The runtime layer lazily starts the background worker and the worker writes temporary generated outputs under the user folder.
+9. The client polls `generate_status_view`, which reads runtime job state.
 10. The client finalizes output through `save_music` or `save_music_cocreate`.
 
 Mental model:
@@ -66,7 +68,9 @@ Mental model:
 - HTTP endpoints orchestrate the workflow.
 - WAV files and CSV files are the durable state.
 - in-memory Python objects track transient generation jobs.
-- a subprocess worker handles YAMNet-based classification and clustering.
+- a subprocess worker handles YAMNet-based filtering, classification, and clustering.
+- controller, service, and runtime code are split by responsibility so lightweight imports stay cheap.
+- heavy audio and generation libraries are loaded lazily where practical so simple requests and tests do not pay their import cost up front.
 
 ## System Diagram
 
@@ -78,7 +82,7 @@ Mental model:
           v
 +-------------------------------------------+
 | Django endpoints                          |
-| CoughToMusic/views.py                     |
+| CoughToMusic/views/                       |
 +-------------------------------------------+
    |                |                  |
    |                |                  |
@@ -102,7 +106,8 @@ Mental model:
                            v
                   +----------------------+
                   | YAMNet subprocess     |
-                  | classify + cluster    |
+                  | filter + classify +   |
+                  | cluster               |
                   +----------------------+
                       |              |
                       |              |
@@ -118,14 +123,10 @@ Mental model:
              +------------------+
                       |
                       v
-             +------------------+
-             | in-memory queue  |
-             +------------------+
-                      |
-                      v
-             +------------------+
-             | worker thread    |
-             +------------------+
+             +----------------------------+
+             | runtime queue + worker     |
+             | lazy startup               |
+             +----------------------------+
                       |
                       v
              +------------------+
@@ -164,8 +165,8 @@ Reading the diagram from top to bottom:
 
 - the client talks only to Django endpoints
 - Django writes durable files and CSVs under `media/`
-- classification and clustering cross into a separate worker process
-- generation is queued in memory and processed by a background thread
+- filtering, classification, and clustering cross into a separate worker process
+- generation is queued in memory and processed by a background runtime worker that starts lazily
 - final outputs are moved from temp folders into permanent user folders
 
 ## Request Flow By Area
@@ -177,15 +178,15 @@ User setup:
 Upload and analysis:
 
 - `create_cough_audio` saves the audio file early.
-- It then filters the saved file.
+- It then filters the saved file through the subprocess worker boundary.
 - It calls helper code that classifies cough ownership and computes clustering.
 - It may also publish audio into shared public folders.
 
 Generation:
 
 - `generate` normalizes the requested mode and creates a `GenerateJob`.
-- A background thread consumes jobs from an in-process queue.
-- Mode-specific generation is implemented in `CoughToMusic/task.py` and `CoughToMusic/co_create_utils.py`.
+- The runtime layer lazily starts a single background thread and consumes jobs from an in-memory queue.
+- Mode-specific generation is delegated from `CoughToMusic/task.py` into `CoughToMusic/services/generation_modes.py` and `CoughToMusic/co_create_utils.py`.
 
 Readback:
 
@@ -280,8 +281,9 @@ That means environment setup is machine-specific and should be verified locally 
 
 Generation is asynchronous, but simple:
 
-- an in-process `Queue` stores jobs
+- an in-memory runtime queue stores jobs
 - one daemon thread consumes them
+- the runtime starts lazily on first generation use
 - job status is kept in memory
 - process restarts lose job metadata
 
@@ -302,12 +304,13 @@ There is no built-in backup system for uploaded inputs.
 
 ## Verification Reality
 
-Automated coverage is minimal.
+Automated coverage is still limited, but `CoughToMusic/tests.py` now includes request-level coverage for failed-then-successful upload behavior around the filter wrapper plus focused startup probes for helper imports.
 
-- `CoughToMusic/tests.py` is a stub
 - `test.py` appears stale and references an endpoint that is not currently routed
 
 For most changes, real verification means exercising the relevant HTTP endpoints and inspecting the resulting files and CSV rows.
+
+Upload filtering now has request-level tests that mock the `run_cli(...)` seam to verify one failed upload does not poison the next request in the same Django process. The coverage includes failure on the initial user-file filter call and failure on the later public-copy filter call. The test suite also checks that helper imports do not eagerly load the heavy audio stack or generation helpers.
 
 ## Practical Advice For Contributors
 

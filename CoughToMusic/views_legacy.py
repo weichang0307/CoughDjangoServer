@@ -2,8 +2,8 @@ import os
 from django.views.decorators.csrf import csrf_exempt
 from .util import save_pcm16_to_wav, init_user_folder, save_music_move, save_wav_with_resample, save_pcm16_to_wav, fake_cough_dist, filter_coughs, clustering, classify_cough_event, filter_coughs_template
 from .table import update_user_table, init_user_table, init_cough_table, update_cough_table, init_music_table, update_music_table
-from .co_create_utils import save_final_cocreate
-from .task import GenerateJob, task_progress
+from .runtime.generation_queue import enqueue_job, get_generation_job, get_generation_jobs_snapshot, remove_completed_job
+from .task import GenerateJob
 from django.conf import settings
 from django.http import JsonResponse 
 from django.http import Http404
@@ -16,7 +16,6 @@ from django.http import StreamingHttpResponse, Http404
 from wsgiref.util import FileWrapper
 import os
 import datetime
-from threading import Thread
 from queue import Queue
 import warnings
 import soundfile as sf
@@ -34,7 +33,6 @@ COUGH_TABLE_COLUMNS = ['filename', 'timestamp', 'pubCoughID', 'time', 'latitude'
 MUSIC_TABLE_COLUMNS = ['filename', 'timestamp', 'time']
 
 
-generate_task_queue = Queue()
 processing_jobs = []  # 存放處理中的工作
 completed_jobs = []   # 存放完成的工作
 
@@ -59,7 +57,6 @@ def generate_worker():
         print(f"[Worker] Finished job {job.uuid}")
         generate_task_queue.task_done()
 
-Thread(target=generate_worker, daemon=True).start()
 
 # ✅ Queue monitor: print queue length every 2 seconds
 # def monitor_queue(queue):
@@ -1169,6 +1166,8 @@ def rename_music(request):
 def save_music_cocreate(request):
     if request.method == 'POST':
         try:
+            from .co_create_utils import save_final_cocreate
+
             metadata_dict = json.loads(request.body)
             userid = metadata_dict.get('userId')
             uuid = metadata_dict.get('uuid')
