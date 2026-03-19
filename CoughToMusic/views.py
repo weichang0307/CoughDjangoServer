@@ -1321,7 +1321,6 @@ def generate_status_view(request):
     all_jobs = queued_jobs + processing_jobs_status + completed_jobs_status
     #print(f"[generate_status_view] all_jobs count: {len(all_jobs)}")
     return JsonResponse(all_jobs, safe=False, status=200)
-
 @csrf_exempt
 def submit_survey(request):
     if request.method == 'POST':
@@ -1333,10 +1332,11 @@ def submit_survey(request):
             if not user_id or not filename:
                 return JsonResponse({'error': 'Missing userId or fileName'}, status=400)
 
-            # 定義問卷記錄的欄位
+            # 1. 更新欄位定義，加入 satisfaction 與 perception_of_others
             columns = [
                 'timestamp', 'filename', 'source_type', 'source_detail', 
-                'selected_mode', 'thoughts', 'has_shared', 'share_details', 
+                'selected_mode', 'satisfaction', 'perception_of_others', # <--- 新增欄位
+                'thoughts', 'has_shared', 'share_details', 
                 'original_process_mode'
             ]
 
@@ -1344,32 +1344,46 @@ def submit_survey(request):
             os.makedirs(user_folder, exist_ok=True)
             survey_table_path = os.path.join(user_folder, 'survey_table.csv')
 
-            # 處理可能為巢狀字典的 source_detail，將其轉為 JSON 字串以便存入單一 CSV 欄位
+            # 處理可能為巢狀字典的 source_detail
             source_detail = metadata_dict.get('source_detail', '')
             if isinstance(source_detail, (dict, list)):
                 source_detail = json.dumps(source_detail, ensure_ascii=False)
 
+            # 2. 將前端傳來的數值寫入 row_data
             row_data = {
                 'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'filename': filename,
                 'source_type': metadata_dict.get('source_type', ''),
                 'source_detail': source_detail,
                 'selected_mode': metadata_dict.get('selected_mode', ''),
+                'satisfaction': metadata_dict.get('satisfaction', ''),                  # <--- 擷取滿意度
+                'perception_of_others': metadata_dict.get('perception_of_others', ''),  # <--- 擷取感知度
                 'thoughts': metadata_dict.get('thoughts', ''),
                 'has_shared': metadata_dict.get('has_shared', ''),
                 'share_details': metadata_dict.get('share_details', ''),
                 'original_process_mode': metadata_dict.get('original_process_mode', '')
             }
 
-            # 檢查檔案是否存在，以決定是否需要寫入標題列 (header)
+            # 檢查檔案是否存在
             file_exists = os.path.exists(survey_table_path)
             
             df = pd.DataFrame([row_data])
             
+            # 3. 處理 CSV 寫入邏輯 (為確保研究數據結構一致，加入了欄位數量檢查)
             if not file_exists:
                 df.to_csv(survey_table_path, index=False, columns=columns)
             else:
-                df.to_csv(survey_table_path, mode='a', header=False, index=False, columns=columns)
+                # 讀取舊檔案的標題列來比對，避免 pandas 因為欄位數量不符而寫入錯位
+                existing_df = pd.read_csv(survey_table_path, nrows=0) 
+                if 'satisfaction' not in existing_df.columns:
+                    # 如果舊檔案沒有新欄位，會將整份讀取，補上空欄位後重新覆寫
+                    full_old_df = pd.read_csv(survey_table_path)
+                    full_old_df['satisfaction'] = ''
+                    full_old_df['perception_of_others'] = ''
+                    combined_df = pd.concat([full_old_df, df], ignore_index=True)
+                    combined_df.to_csv(survey_table_path, index=False, columns=columns)
+                else:
+                    df.to_csv(survey_table_path, mode='a', header=False, index=False, columns=columns)
 
             return JsonResponse({'message': 'Survey submitted successfully.'}, status=200)
 

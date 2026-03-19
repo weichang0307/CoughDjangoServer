@@ -31,7 +31,11 @@ def detect_cough_with_yamnet(audio, sr):
         chunk=audio[s:e]
         if not np.any(chunk): probs.append(0.0); continue
         pre=preprocess_input(chunk, sr)
-        p=get_yamnet_model().predict(np.expand_dims(pre,0),verbose=0)[0][COUGH_CLASS] if model is None else model.predict(np.expand_dims(pre,0),verbose=0)[0][COUGH_CLASS]
+        
+        # 【修改點】：使用 model(x, training=False) 避開 Keras predict 的 Graph 衝突
+        input_tensor = np.expand_dims(pre, 0)
+        p = model(input_tensor, training=False)[0][COUGH_CLASS]
+        
         probs.append(float(p))
     if not probs: return []
     sma=np.convolve(probs, np.ones(SMOOTH_K)/SMOOTH_K, mode="same") if len(probs)>=SMOOTH_K else np.asarray(probs,float)
