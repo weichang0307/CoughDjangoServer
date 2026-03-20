@@ -74,96 +74,87 @@ Mental model:
 
 ## System Diagram
 
-```text
-+------------------+
-|    Client App    |
-+------------------+
-          |
-          v
-+-------------------------------------------+
-| Django endpoints                          |
-| CoughToMusic/views/                       |
-+-------------------------------------------+
-   |                |                  |
-   |                |                  |
-   v                v                  v
-+----------+   +----------------+   +----------------------+
-| sign_up  |   | create_cough_  |   | get_coughs /         |
-|          |   | audio          |   | get_music /          |
-+----------+   +----------------+   | get_uploads_file     |
-   |                |               +----------------------+
-   v                v
-+----------------+  +--------------------------------------+
-| create user    |  | save WAV                             |
-| folders + CSVs |  | media/<user>/cough_audio/           |
-+----------------+  +--------------------------------------+
-                           |
-                           v
-                  +----------------------+
-                  | filter cough audio   |
-                  +----------------------+
-                           |
-                           v
-                  +----------------------+
-                  | YAMNet subprocess     |
-                  | filter + classify +   |
-                  | cluster               |
-                  +----------------------+
-                      |              |
-                      |              |
-                      v              v
-          +--------------------+   +----------------------+
-          | append cough row   |   | optional public      |
-          | cough_table.csv    |   | write public_cough/  |
-          +--------------------+   +----------------------+
-                      |
-                      v
-             +------------------+
-             | generate         |
-             +------------------+
-                      |
-                      v
-             +----------------------------+
-             | runtime queue + worker     |
-             | lazy startup               |
-             +----------------------------+
-                      |
-                      v
-             +------------------+
-             | GenerateJob      |
-             +------------------+
-                      |
-                      v
-             +------------------------------+
-             | temp outputs                 |
-             | temp_music / temp_trio / ... |
-             +------------------------------+
-                      |
-          +-----------+-----------+
-          |                       |
-          v                       v
-+----------------------+   +----------------------+
-| generate_status_view |   | save_music /         |
-| reads in-memory job  |   | save_music_cocreate  |
-| state                |   +----------------------+
-+----------------------+              |
-                                      v
-                          +------------------------------+
-                          | final saved outputs          |
-                          | generated_music /            |
-                          | generated_trio / generated_* |
-                          +------------------------------+
-                                      |
-                                      v
-                          +------------------------------+
-                          | append music metadata        |
-                          | music_table.csv              |
-                          +------------------------------+
+```mermaid
+flowchart TD
+    client["Client App"]
+
+    subgraph django["Django Request Layer"]
+        urls["CoughToMusic/urls.py"]
+
+        subgraph views["CoughToMusic/views/"]
+            users_view["users.py\nsign_up"]
+            cough_view["cough.py\ncreate_cough_audio\nget_coughs"]
+            gen_view["generation.py\ngenerate\ngenerate_status_view\nsave_music\nsave_music_cocreate"]
+            library_view["library.py\nget_music\nget_uploads_file\nother library/readback endpoints"]
+        end
+
+        users_service["services/users.py"]
+        uploads_service["services/uploads.py"]
+        generation_service["services/generation.py"]
+        legacy_views["views_legacy.py\nlegacy readback/library implementation"]
+    end
+
+    subgraph worker["Subprocess Worker Boundary"]
+        util_helpers["util.py\nfilter_coughs\nclassify_cough_event\nclustering"]
+        runner["utils/runner.py\nrun_cli"]
+        yamnet["yamnet_worker/run_yamnet_worker.py\nfilter/classify/cluster"]
+    end
+
+    subgraph runtime["In-Memory Generation Runtime"]
+        queue["runtime/generation_queue.py\nQueue plus lazy daemon thread"]
+        job["task.py\nGenerateJob"]
+        modes["services/generation_modes.py\nmode-specific generation"]
+    end
+
+    subgraph storage["Filesystem plus CSV State Under media/"]
+        user_csv["media/{user}/{user}.csv\nuser metadata"]
+        cough_audio["media/{user}/cough_audio/*.wav"]
+        cough_csv["media/{user}/cough_audio/cough_table.csv"]
+        public_cough["media/public_cough/*.wav"]
+        temp_outputs["media/{user}/temp_*"]
+        final_outputs["media/{user}/generated_*"]
+        music_csv["media/{user}/generated_music/music_table.csv"]
+    end
+
+    client --> urls
+    urls --> users_view
+    urls --> cough_view
+    urls --> gen_view
+    urls --> library_view
+
+    users_view --> users_service
+    users_service --> user_csv
+
+    cough_view --> uploads_service
+    uploads_service --> cough_audio
+    uploads_service --> util_helpers
+    util_helpers --> runner
+    runner --> yamnet
+    yamnet --> runner
+    runner --> util_helpers
+    uploads_service --> cough_csv
+    uploads_service --> public_cough
+
+    gen_view --> generation_service
+    generation_service --> queue
+    queue --> job
+    job --> modes
+    modes --> temp_outputs
+    gen_view --> queue
+    generation_service --> final_outputs
+    generation_service --> music_csv
+
+    library_view --> legacy_views
+    legacy_views --> cough_audio
+    legacy_views --> final_outputs
+    legacy_views --> cough_csv
+    legacy_views --> music_csv
 ```
 
 Reading the diagram from top to bottom:
 
 - the client talks only to Django endpoints
+- routed views are split between newer `views -> services` flows and a remaining `views -> views_legacy.py` readback/library path
 - Django writes durable files and CSVs under `media/`
 - filtering, classification, and clustering cross into a separate worker process
 - generation is queued in memory and processed by a background runtime worker that starts lazily
@@ -190,11 +181,109 @@ Generation:
 
 Readback:
 
-- `get_coughs`, `get_music`, and `get_uploads_file` expose saved artifacts and metadata back to the client.
+- `get_coughs` now lives directly in `CoughToMusic/views/cough.py`.
+- `get_music`, `get_uploads_file`, and several library/statistics endpoints still pass through `CoughToMusic/views/library.py` into `CoughToMusic/views_legacy.py`.
 
 Finalize:
 
 - `save_music` moves temp outputs into permanent per-user folders and appends music metadata.
+
+## YAMNet Worker Data Flow
+
+The YAMNet-based audio analysis in this repo is not hosted as a web service or model server.
+
+Instead:
+
+- Django launches a separate Python process through `run_cli(...)` in `CoughToMusic/utils/runner.py`.
+- That subprocess runs `CoughToMusic/yamnet_worker/run_yamnet_worker.py`.
+- The worker uses the dedicated interpreter configured by `YAMNET_PYTHON_EXE` in `CoughToMusicDjango/settings.py`.
+- Inside the worker, `yamnet_loader.py` lazily loads the model weights from `CoughToMusic/keras_yamnet/yamnet.h5` and caches the model in-process.
+
+```mermaid
+flowchart TD
+    upload["Client upload request"]
+    view["views/cough.py\ncreate_cough_audio"]
+    service["services/uploads.py\nprocess_cough_upload"]
+    wav["media/{user}/cough_audio/{name}.wav"]
+
+    subgraph django["Django process"]
+        filter_call["util.py\nfilter_coughs\nmode=filter"]
+        classify_call["util.py\nclassify_cough_event\nmode=classify"]
+        cluster_call["util.py\nclustering\nmode=cluster"]
+        cough_csv["media/{user}/cough_audio/cough_table.csv"]
+        public_cough["media/public_cough/*.wav"]
+        split_wavs["media/{user}/cough_audio/{name}_1.wav\nmedia/{user}/cough_audio/{name}_2.wav"]
+        realtime["runtime enqueue\nrealtime mode only"]
+    end
+
+    subgraph worker["YAMNet worker subprocess"]
+        entry["run_yamnet_worker.py"]
+        loader["yamnet_loader.py\nload yamnet.h5 once per worker process"]
+        filter_mode["filter_core.py\nread wav -> detect cough -> rewrite wav"]
+        classify_mode["cough_cluster_core.py\nextract features -> classify user/non-user"]
+        cluster_mode["cough_cluster_core.py\nextract features -> assign cluster_id"]
+    end
+
+    upload --> view --> service --> wav
+    service --> filter_call --> entry
+    entry --> loader
+    entry --> filter_mode
+    filter_mode --> wav
+
+    service --> classify_call --> entry
+    entry --> classify_mode
+    classify_mode --> split_wavs
+
+    service --> cluster_call --> entry
+    entry --> cluster_mode
+
+    classify_mode -. JSON flags and separated arrays .-> service
+    cluster_mode -. JSON cluster_id .-> service
+    filter_mode -. JSON segment metadata .-> service
+
+    service --> cough_csv
+    service --> public_cough
+    service --> realtime
+```
+
+The upload-to-worker flow is:
+
+1. `create_cough_audio` calls `process_cough_upload`.
+2. `process_cough_upload` writes the uploaded bytes to `media/<user>/cough_audio/<name>.wav`.
+3. Django calls `filter_coughs(...)`, which sends a JSON payload with the saved file path to the worker using `mode: "filter"`.
+4. The worker reads the WAV from disk, runs noise reduction plus YAMNet-based cough detection, and writes the filtered result back to the same WAV path by default.
+5. Django then calls `classify_cough_event(...)` with `mode: "classify"`.
+6. The worker loads the saved WAV, extracts YAMNet-derived features around detected cough onsets, and returns whether the audio appears to contain user cough, non-user cough, or both.
+7. Django then calls `clustering(...)` with `mode: "cluster"`.
+8. The worker compares YAMNet-derived features from the target cough against template coughs and prior user coughs, then returns a `cluster_id`.
+9. Django appends the final metadata row to `cough_table.csv` and may also write copies into `media/public_cough/`.
+
+What goes into the worker:
+
+- file paths to WAV files already written under `media/`
+- template and user cough directory paths
+- the cough CSV path for clustering context
+- mode-specific options such as `write_mode`, `sample_rate`, and `strict_mode`
+
+What comes back out of the worker:
+
+- for `filter`: JSON metadata about detected segments, while the main audio output is written back to the WAV on disk
+- for `classify`: JSON describing whether user and/or non-user cough content was detected, plus separated waveform arrays for each side
+- for `cluster`: a JSON object containing the assigned `cluster_id`
+
+Where the outputs flow next:
+
+- the filtered user upload stays in `media/<user>/cough_audio/`
+- `cough_table.csv` is updated with filename, timestamp, coordinates, public cough ID, cluster ID, and `people`
+- if classification indicates mixed user/non-user content, Django writes split `_1.wav` and `_2.wav` files back into the same user cough folder
+- public copies may be written to `media/public_cough/`
+- if the request mode is `realtime`, the saved cough file path is then handed to the in-memory generation queue for music generation
+
+Important operational detail:
+
+- YAMNet is cached only within the lifetime of the worker process started for that subprocess invocation
+- this is a local process boundary, not a persistent inference service
+- failures here can leave a WAV on disk even if later CSV or classification steps do not complete
 
 ## Storage Model
 
