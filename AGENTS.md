@@ -36,7 +36,10 @@ Core helpers:
 - `CoughToMusic/util.py`
 - `CoughToMusic/table.py`
 - `CoughToMusic/task.py`
-- `CoughToMusic/co_create_utils.py`
+- `CoughToMusic/cocreate/contracts.py`
+- `CoughToMusic/cocreate/storage.py`
+- `CoughToMusic/cocreate/workflows.py`
+- `CoughToMusic/co_create_utils.py` is legacy compatibility code and `save_final_cocreate(...)` now emits a deprecation warning when used
 
 Runtime settings:
 
@@ -75,12 +78,12 @@ Generation:
 - `generate` converts request data into a `GenerateJob`
 - jobs are queued in-process
 - the runtime layer starts a daemon thread lazily on first generation use
-- `GenerateJob.run()` delegates mode-specific generation to `CoughToMusic/services/generation_modes.py`
+- `GenerateJob.run()` delegates mode-specific generation to `CoughToMusic/services/generation_modes.py`, which dispatches co-create modes to `CoughToMusic/cocreate/workflows.py`
 
 Finalize:
 
 - `save_music` moves temp outputs into final folders and appends metadata
-- `save_music_cocreate` finalizes co-create outputs
+- `save_music_cocreate` is compatibility-only and now delegates to the same active finalize contract as `save_music`
 
 Readback:
 
@@ -165,8 +168,9 @@ Usually safe when scoped and verified:
 - orchestration helpers in `CoughToMusic/services/`
 - runtime lifecycle helpers in `CoughToMusic/runtime/`
 - path and save/move rules in `CoughToMusic/util.py`
+- cocreate application-layer helpers in `CoughToMusic/cocreate/storage.py` and `CoughToMusic/cocreate/workflows.py`
 - mode-specific generation in `CoughToMusic/services/generation_modes.py`
-- co-create generation helpers in `CoughToMusic/co_create_utils.py`
+- co-create compatibility helpers in `CoughToMusic/co_create_utils.py`
 
 Higher risk:
 

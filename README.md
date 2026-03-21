@@ -38,6 +38,7 @@ Main app:
 - `CoughToMusic/views/`
 - `CoughToMusic/services/`
 - `CoughToMusic/runtime/`
+- `CoughToMusic/cocreate/`
 - `CoughToMusic/util.py`
 - `CoughToMusic/task.py`
 - `CoughToMusic/table.py`
@@ -177,7 +178,8 @@ Generation:
 
 - `generate` normalizes the requested mode and creates a `GenerateJob`.
 - The runtime layer lazily starts a single background thread and consumes jobs from an in-memory queue.
-- Mode-specific generation is delegated from `CoughToMusic/task.py` into `CoughToMusic/services/generation_modes.py` and `CoughToMusic/co_create_utils.py`.
+- Mode-specific generation is delegated from `CoughToMusic/task.py` into `CoughToMusic/services/generation_modes.py`.
+- Co-create modes then flow through `CoughToMusic/cocreate/workflows.py`, with `CoughToMusic/cocreate/storage.py` owning path and CSV lookup concerns.
 
 Readback:
 
@@ -424,3 +426,132 @@ The upload tests intentionally create temporary media roots under `media/test_me
 - be careful with path changes and filename conventions
 - keep the Django-to-worker subprocess contract stable unless you are intentionally redesigning it
 - verify both the API response and the saved artifact path for generation changes
+
+## Co-Create Dataflow
+
+`CoughToMusic/cocreate/` is a library layer, not the HTTP entrypoint.
+
+The active co-create request flow is:
+
+1. The client calls `generate` with `mode` set to `co_create_trio` or `co_create_drum`.
+2. `CoughToMusic/services/generation.py` converts the caret-delimited `cough_path` string into real WAV paths under `media/<user>/cough_audio/`.
+3. The same service normalizes request mode into one of the runtime job modes: `trio`, `trio_manual`, `drum`, or `drum_manual`.
+4. The in-memory runtime queue starts lazily, stores the `GenerateJob`, and runs it on the single worker thread.
+5. `CoughToMusic/services/generation_modes.py` dispatches to `CoughToMusic/cocreate/workflows.py`.
+6. `workflows.py` uses `CoughToMusic/cocreate/storage.py` for path and CSV lookup, then calls the lower-level `CoughToMusic/cocreate/lib/` modules.
+7. The `cocreate/lib/` code reads cough WAVs, shared public cough assets, model checkpoints, and soundfonts, then writes MIDI and rendered WAV artifacts into mode-specific temp folders.
+8. The client polls `generate_status_view` and receives the generated temp artifact paths from the in-memory job result.
+9. The active finalize path is `save_music`, which moves co-create temp outputs into permanent `generated_*` folders and appends metadata to the standard music table.
+
+The current library split is:
+
+- `cocreate/contracts.py` defines the typed request/result objects for the active workflows.
+- `cocreate/storage.py` owns path construction, `cough_table.csv` lookup, and public asset path helpers.
+- `cocreate/workflows.py` is the active orchestration layer for trio and drum generation.
+- `co_create_utils.py` is legacy compatibility code for older call sites and emits a deprecation warning if `save_final_cocreate` is invoked directly.
+- `cocreate/lib/cough2mid.py` turns a cough WAV into short motif MIDI.
+- `cocreate/lib/generation.py` interpolates melody or drum material with Magenta/MusicVAE checkpoints under `CoughToMusic/cocreate/model/`.
+- `cocreate/lib/drum.py` classifies coughs into drum roles and writes drum MIDI from onset/loudness features.
+- `cocreate/lib/midi.py` normalizes MIDI structure and renders MIDI back to WAV using soundfonts.
+
+Mode-specific temp and final folders in the active flow:
+
+- trio: `temp_trio` -> `generated_trio`
+- trio manual: `temp_manual_trio` -> `generated_manual_trio`
+- drum manual: `temp_manual_drum` -> `generated_manual_drum`
+- drum autofill: `temp_autofill_drum` -> `generated_autofill_drum`
+
+Important caveat:
+
+- `save_music` remains the canonical finalize path for generated output.
+- `save_music_cocreate` is now a compatibility endpoint that delegates to the same active finalize contract used by `save_music`.
+- `co_create_utils.save_final_cocreate` still reflects the older `temp_cocreate` / `generated_music_cocreate` layout, should be treated as legacy compatibility code rather than the active runtime path, and now emits a `DeprecationWarning` when called.
+
+```mermaid
+flowchart TD
+    client["Client"]
+    generate_view["views/generation.py<br/>generate"]
+    gen_service["services/generation.py<br/>enqueue_generation_request"]
+    queue["runtime/generation_queue.py<br/>lazy in-memory queue"]
+    job["task.py<br/>GenerateJob.run"]
+    modes["services/generation_modes.py<br/>trio / trio_manual / drum / drum_manual"]
+    workflows["cocreate/workflows.py<br/>active orchestration"]
+    storage["cocreate/storage.py<br/>paths + CSV lookup"]
+
+    subgraph cocreate["CoughToMusic/cocreate/lib"]
+        cough2mid["cough2mid.py<br/>cough WAV -> motif MIDI"]
+        melody["generation.py<br/>MusicVAE interpolation"]
+        drum["drum.py<br/>cough ranking -> drum MIDI"]
+        midi["midi.py<br/>normalize/render MIDI -> WAV"]
+    end
+
+    subgraph inputs["Read-side inputs"]
+        user_wavs["media/{user}/cough_audio/*.wav"]
+        cough_csv["media/{user}/cough_audio/cough_table.csv"]
+        public_cough["media/public_cough/*.wav"]
+        public_motifs["media/public_motif/* and related public motif dirs"]
+        models["CoughToMusic/cocreate/model/*"]
+        soundfonts["CoughToMusic/cocreate/soundfonts/*"]
+    end
+
+    subgraph temp["Temp outputs"]
+        temp_trio["media/{user}/temp_trio"]
+        temp_manual_trio["media/{user}/temp_manual_trio"]
+        temp_manual_drum["media/{user}/temp_manual_drum"]
+        temp_autofill_drum["media/{user}/temp_autofill_drum"]
+    end
+
+    status["views/generation.py<br/>generate_status_view"]
+    save_view["views/generation.py<br/>save_music"]
+    save_service["services/generation.py<br/>save_music_result"]
+    move["util.py<br/>save_music_move"]
+
+    subgraph final["Finalized outputs"]
+        gen_trio["media/{user}/generated_trio"]
+        gen_manual_trio["media/{user}/generated_manual_trio"]
+        gen_manual_drum["media/{user}/generated_manual_drum"]
+        gen_auto_drum["media/{user}/generated_autofill_drum"]
+        music_csv["media/{user}/generated_music/music_table.csv"]
+    end
+
+    legacy["views/generation.py<br/>save_music_cocreate (compatibility)"]
+    legacy_save["co_create_utils.py<br/>legacy save_final_cocreate"]
+
+    client --> generate_view --> gen_service --> queue --> job --> modes --> workflows
+    gen_service --> user_wavs
+    workflows --> storage
+    workflows --> cough_csv
+    workflows --> user_wavs
+    workflows --> public_cough
+    workflows --> public_motifs
+    workflows --> cough2mid
+    workflows --> melody
+    workflows --> drum
+    cough2mid --> midi
+    melody --> midi
+    drum --> midi
+    melody --> models
+    midi --> soundfonts
+
+    workflows --> temp_trio
+    workflows --> temp_manual_trio
+    workflows --> temp_manual_drum
+    workflows --> temp_autofill_drum
+
+    client --> status
+    status --> queue
+
+    client --> save_view --> save_service --> move
+    move --> temp_trio
+    move --> temp_manual_trio
+    move --> temp_manual_drum
+    move --> temp_autofill_drum
+    move --> gen_trio
+    move --> gen_manual_trio
+    move --> gen_manual_drum
+    move --> gen_auto_drum
+    move --> music_csv
+
+    client -. compatibility endpoint .-> legacy
+    legacy -. legacy helper remains in repo .-> legacy_save
+```

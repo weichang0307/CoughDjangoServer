@@ -66,9 +66,9 @@ def save_music_result(user_id, job_uuid, file_name, output_type):
 
 
 def save_cocreate_result(user_id, job_uuid, file_name):
-    from ..co_create_utils import save_final_cocreate
+    from ..cocreate.finalize import finalize_cocreate_result
 
-    save_final_cocreate(user_id, job_uuid, file_name)
+    finalize_cocreate_result(user_id, job_uuid, file_name)
 
 
 def _normalize_generation_mode(mode, cough_length):

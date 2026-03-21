@@ -1,4 +1,5 @@
 import csv
+import importlib.util
 import json
 import os
 import subprocess
@@ -6,6 +7,9 @@ import sys
 import shutil
 import uuid
 import wave
+import types
+import warnings
+from pathlib import Path
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -13,8 +17,14 @@ from django.conf import settings
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from CoughToMusic.runtime import generation_queue
-from CoughToMusic.services import generation as generation_service
+from CoughToMusic.cocreate import storage as cocreate_storage
+from CoughToMusic.cocreate.contracts import CoCreateResult
+
+
+def _stub_task_module():
+    module = types.ModuleType("CoughToMusic.task")
+    module.task_progress = {}
+    return module
 
 
 class RuntimeStartupTests(TestCase):
@@ -52,7 +62,174 @@ class RuntimeStartupTests(TestCase):
     def test_task_import_keeps_generation_helpers_lazy(self):
         self._assert_module_import_is_lazy(
             "CoughToMusic.task",
-            ["CoughToMusic.co_create_utils", "librosa", "soundfile"],
+            ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
+        )
+
+    def test_cocreate_workflows_import_keeps_heavy_modules_lazy(self):
+        self._assert_module_import_is_lazy(
+            "CoughToMusic.cocreate.workflows",
+            ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
+        )
+
+
+class CoCreateRefactorTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._temp_media_path = os.path.join(
+            settings.BASE_DIR,
+            "media",
+            f"test_media_{uuid.uuid4().hex}",
+        )
+        os.makedirs(self._temp_media_path, exist_ok=False)
+        self.addCleanup(lambda: shutil.rmtree(self._temp_media_path, ignore_errors=True))
+
+        self._override = override_settings(MEDIA_ROOT=self._temp_media_path)
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+
+        os.makedirs(os.path.join(self._temp_media_path, "public_cough"), exist_ok=True)
+        os.makedirs(os.path.join(self._temp_media_path, "public_motif", "mel_mid"), exist_ok=True)
+
+    def _make_job(self, mode, cough_names, user_id="refactor-user"):
+        return type(
+            "Job",
+            (),
+            {
+                "mode": mode,
+                "uuid": f"{mode}-uuid",
+                "user_id": user_id,
+                "data": {
+                    "user_id": user_id,
+                    "bass": "Tuba",
+                    "alto": "Clarinet",
+                    "high": "Flute",
+                    "cough_path": "^".join(cough_names),
+                },
+                "coughlist": [
+                    Path(self._temp_media_path) / user_id / "cough_audio" / f"{name}.wav"
+                    for name in cough_names
+                ],
+                "file_path": str(
+                    Path(self._temp_media_path) / user_id / "cough_audio" / f"{cough_names[0]}.wav"
+                ),
+            },
+        )()
+
+    def test_generation_mode_normalization_for_co_create(self):
+        with patch.dict(sys.modules, {"CoughToMusic.task": _stub_task_module()}):
+            from CoughToMusic.services import generation as generation_service
+
+            self.assertEqual(generation_service._normalize_generation_mode("co_create_trio", 1), "trio")
+            self.assertEqual(generation_service._normalize_generation_mode("co_create_trio", 4), "trio_manual")
+            self.assertEqual(generation_service._normalize_generation_mode("co_create_drum", 6), "drum")
+            self.assertEqual(generation_service._normalize_generation_mode("co_create_drum", 7), "drum_manual")
+            with self.assertRaises(ValueError):
+                generation_service._normalize_generation_mode("co_create_trio", 5)
+
+    def test_generation_modes_delegate_to_workflows(self):
+        cases = [
+            ("trio", "run_trio"),
+            ("trio_manual", "run_trio_manual"),
+            ("drum_manual", "run_drum_manual"),
+            ("drum", "run_drum_autofill"),
+        ]
+        with patch.dict(sys.modules, {"CoughToMusic.task": _stub_task_module()}):
+            from CoughToMusic.services import generation_modes
+
+            for mode, patch_name in cases:
+                job = self._make_job(mode, ["listed"])
+                captured = {}
+
+                def fake_runner(request):
+                    captured["request"] = request
+                    return CoCreateResult(
+                        generated_music=f"{mode}.wav",
+                        cough_paths=request.cough_paths,
+                        cough_motifs=["m1.wav"],
+                        used_public_paths=["public.wav"],
+                        used_motif_paths=["motif.wav"],
+                    )
+
+                with patch(f"CoughToMusic.services.generation_modes.{patch_name}", side_effect=fake_runner):
+                    payload = generation_modes.execute_generation_mode(job)
+
+                self.assertEqual(payload["generated_music"], f"{mode}.wav")
+                self.assertEqual(payload["cough_paths"], [str(job.coughlist[0])])
+                self.assertEqual(captured["request"].mode, mode)
+                self.assertEqual(captured["request"].user_id, job.user_id)
+                self.assertIsInstance(captured["request"].coughlist[0], Path)
+
+    def test_resolve_pub_cough_id_reads_cough_table(self):
+        user_id = "refactor-user"
+        cough_dir = Path(self._temp_media_path) / user_id / "cough_audio"
+        cough_dir.mkdir(parents=True, exist_ok=True)
+        table_path = cough_dir / "cough_table.csv"
+        with table_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["filename", "pubCoughID"])
+            writer.writeheader()
+            writer.writerow({"filename": "listed.wav", "pubCoughID": "42"})
+
+        resolved = cocreate_storage.resolve_pub_cough_id(user_id, cough_dir / "listed.wav")
+        self.assertEqual(resolved, 42)
+
+    def test_resolve_pub_cough_id_raises_when_row_is_missing(self):
+        user_id = "refactor-user"
+        cough_dir = Path(self._temp_media_path) / user_id / "cough_audio"
+        cough_dir.mkdir(parents=True, exist_ok=True)
+        table_path = cough_dir / "cough_table.csv"
+        with table_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["filename", "pubCoughID"])
+            writer.writeheader()
+            writer.writerow({"filename": "other.wav", "pubCoughID": "42"})
+
+        with self.assertRaises(ValueError):
+            cocreate_storage.resolve_pub_cough_id(user_id, cough_dir / "listed.wav")
+
+    def test_save_music_move_preserves_cocreate_folder_mapping(self):
+        from CoughToMusic.util import save_music_move
+
+        user_id = "refactor-user"
+        cases = [
+            ("trio", "temp_trio", "generated_trio", "_trio.wav"),
+            ("trio_manual", "temp_manual_trio", "generated_manual_trio", "_trio.wav"),
+            ("drum_manual", "temp_manual_drum", "generated_manual_drum", "_drum.wav"),
+            ("drum", "temp_autofill_drum", "generated_autofill_drum", "_drum.wav"),
+        ]
+
+        with patch("builtins.print"), patch("CoughToMusic.util.update_music_table") as update_table:
+            for output_type, temp_folder_name, final_folder_name, suffix in cases:
+                temp_folder = Path(self._temp_media_path) / user_id / temp_folder_name
+                temp_folder.mkdir(parents=True, exist_ok=True)
+                source_file = temp_folder / f"job-1{suffix}"
+                source_file.write_bytes(b"wave")
+
+                save_music_move(user_id, "job-1", "song", output_type)
+
+                expected_file = Path(self._temp_media_path) / user_id / final_folder_name / "song" / f"song{suffix}"
+                self.assertTrue(expected_file.exists(), expected_file)
+                self.assertFalse(source_file.exists())
+
+        self.assertEqual(update_table.call_count, len(cases))
+
+    def test_legacy_save_final_cocreate_emits_warning(self):
+        from CoughToMusic import co_create_utils
+
+        user_id = "refactor-user"
+        user_folder = Path(self._temp_media_path) / user_id
+        (user_folder / "generated_music_cocreate").mkdir(parents=True, exist_ok=True)
+
+        with warnings.catch_warnings(record=True) as caught, patch(
+            "builtins.print"
+        ), patch("CoughToMusic.co_create_utils.update_music_table"):
+            warnings.simplefilter("always")
+            co_create_utils.save_final_cocreate(user_id, "job-1", "song")
+
+        self.assertTrue(
+            any(
+                warning.category is DeprecationWarning
+                and co_create_utils.LEGACY_SAVE_FINAL_COCREATE_WARNING in str(warning.message)
+                for warning in caught
+            )
         )
 
 
@@ -303,14 +480,17 @@ class UploadFilterIsolationTests(TestCase):
 class GenerationRuntimeTests(TestCase):
     def setUp(self):
         super().setUp()
+        from CoughToMusic.runtime import generation_queue
+
+        self.generation_queue = generation_queue
         generation_queue._runtime = None
 
     def tearDown(self):
-        generation_queue._runtime = None
+        self.generation_queue._runtime = None
         super().tearDown()
 
     def test_runtime_is_lazy_until_generate(self):
-        self.assertIsNone(generation_queue._runtime)
+        self.assertIsNone(self.generation_queue._runtime)
 
         sign_up_response = self.client.post(
             reverse("sign_up"),
@@ -333,7 +513,7 @@ class GenerationRuntimeTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(sign_up_response.status_code, 200, sign_up_response.content.decode())
-        self.assertIsNone(generation_queue._runtime)
+        self.assertIsNone(self.generation_queue._runtime)
 
         def fast_run(job_self):
             job_self.status = "completed"
@@ -357,7 +537,7 @@ class GenerationRuntimeTests(TestCase):
             )
 
         self.assertEqual(generate_response.status_code, 202, generate_response.content.decode())
-        self.assertIsNotNone(generation_queue._runtime)
+        self.assertIsNotNone(self.generation_queue._runtime)
 
     def test_generation_status_payload_serializes_runtime_snapshot(self):
         class StubJob:
@@ -371,6 +551,8 @@ class GenerationRuntimeTests(TestCase):
                 self.data = {"cough_path": "seed"}
 
         payload = json.dumps({"userId": "queue-user"}).encode("utf-8")
+        from CoughToMusic.services import generation as generation_service
+
         with patch(
             "CoughToMusic.services.generation.get_generation_jobs_snapshot",
             return_value={
@@ -387,6 +569,8 @@ class GenerationRuntimeTests(TestCase):
         self.assertEqual(data[2]["result"], {"generate_path": "stub"})
 
     def test_save_music_result_removes_completed_job_before_move(self):
+        from CoughToMusic.services import generation as generation_service
+
         with patch("CoughToMusic.services.generation.remove_completed_job") as remove_job, patch(
             "CoughToMusic.services.generation.save_music_move"
         ) as save_move:

@@ -1,8 +1,16 @@
+"""Legacy cocreate helpers.
+
+Active co-create orchestration now lives in `CoughToMusic.cocreate.workflows`.
+This module remains for compatibility with older call sites and the legacy
+`save_music_cocreate` path.
+"""
+
 import sys
 from pathlib import Path
 import os
 import shutil
 import datetime
+import warnings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(BASE_DIR))
@@ -60,6 +68,11 @@ BASS_CONFIG = {
     "energy_th": -1000 #-50,
 }
 instruments = {'mel': 40, 'acc': 41, 'bass': 43}
+
+LEGACY_SAVE_FINAL_COCREATE_WARNING = (
+    "CoughToMusic.co_create_utils.save_final_cocreate() is legacy compatibility "
+    "code. Prefer the active finalize path in CoughToMusic.cocreate.finalize."
+)
 
 # def sound_synthesis(Db, Room_size, Damping, Wet_level, synthesized_audio, sample_rate):
 #     board = Pedalboard([
@@ -498,6 +511,12 @@ def update_music_table(user_id, data):
     df.to_csv(music_table_path, index=False)
 
 def save_final_cocreate(user_id, uuid, filename_display):
+    warnings.warn(
+        LEGACY_SAVE_FINAL_COCREATE_WARNING,
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    print(f"WARNING: {LEGACY_SAVE_FINAL_COCREATE_WARNING}")
     """
     修正後的 save_music_move 確保最內層的檔案名稱是 filename 而不是 uuid。
     """
