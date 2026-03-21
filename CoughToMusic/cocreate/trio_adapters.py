@@ -51,7 +51,6 @@ def generate_public_trio_motif(pub_cough_id: int, user_id: str, job_uuid: str) -
     max_length = max(len(samples) for samples in audio.values())
     merged_audio = sum(np.pad(samples, (0, max_length - len(samples)), "constant") for samples in audio.values())
     sf.write(merged_output_path, merged_audio, 16000)
-    print(f"Saved output path: {merged_output_path}")
     return merged_output_path
 
 
@@ -65,7 +64,6 @@ def generate_trio_midi_sequence(pub_cough_id: int) -> tuple[list[str], list[str]
         return int(filename.replace("mel_", "").replace(".mid", ""))
 
     sequence = [pub_cough_id] + [extract_id(filename) for filename in selected]
-    print(f"MIDI sequence: {sequence}")
 
     for track in TRACKS:
         sequence_paths = [str(get_public_motif_mid_path(track, item_id)) for item_id in sequence]
@@ -100,7 +98,6 @@ def render_public_trio_tracks(pub_cough_id: int, user_id: str, job_uuid: str, us
     max_length = max(len(samples) for samples in audio.values())
     merged_audio = sum(np.pad(samples, (0, max_length - len(samples)), "constant") for samples in audio.values())
     sf.write(merged_output_path, merged_audio, 16000)
-    print(f"Saved output path: {merged_output_path}")
     return merged_output_path
 
 
@@ -189,5 +186,4 @@ def render_manual_trio_tracks(user_folder: str, job_uuid: str) -> str:
     max_length = max(len(samples) for samples in audio.values())
     merged_audio = sum(np.pad(samples, (0, max_length - len(samples)), "constant") for samples in audio.values())
     sf.write(merged_output_path, merged_audio, 16000)
-    print(f"Saved output path: {merged_output_path}")
     return merged_output_path

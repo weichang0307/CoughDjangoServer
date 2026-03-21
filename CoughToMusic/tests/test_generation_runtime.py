@@ -96,6 +96,25 @@ class GenerationRuntimeTests(TestCase):
         self.assertEqual(data[0]["cough_path"], "seed")
         self.assertEqual(data[2]["result"], {"generate_path": "stub"})
 
+    def test_generation_status_payload_exposes_legacy_drum_autofill_mode(self):
+        class StubJob:
+            def __init__(self):
+                self.uuid = "drum-job"
+                self.mode = "drum"
+                self.time = "2026-03-20 00:00:00"
+                self.duration = 0.1
+                self.status = "completed"
+                self.result = {"generated_music": "temp.wav"}
+
+        payload = json.dumps({"uuid": "drum-job"}).encode("utf-8")
+        from CoughToMusic.services import generation as generation_service
+
+        with patch("CoughToMusic.services.generation.get_generation_job", return_value=StubJob()):
+            data, status_code = generation_service.get_generation_status_payload(payload)
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(data["mode"], "drum_autofill")
+
     def test_save_music_result_removes_completed_job_before_move(self):
         from CoughToMusic.services import generation as generation_service
 
@@ -106,3 +125,14 @@ class GenerationRuntimeTests(TestCase):
 
         remove_job.assert_called_once_with("job-1")
         save_move.assert_called_once_with("jay", "job-1", "song", "normal")
+
+    def test_save_music_result_accepts_legacy_drum_autofill_type(self):
+        from CoughToMusic.services import generation as generation_service
+
+        with patch("CoughToMusic.services.generation.remove_completed_job") as remove_job, patch(
+            "CoughToMusic.services.generation.save_music_move"
+        ) as save_move:
+            generation_service.save_music_result("jay", "job-1", "song", "drum_autofill")
+
+        remove_job.assert_called_once_with("job-1")
+        save_move.assert_called_once_with("jay", "job-1", "song", "drum_autofill")

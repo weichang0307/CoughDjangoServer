@@ -9,6 +9,10 @@ from ..runtime.generation_queue import enqueue_job, get_generation_job, get_gene
 from ..task import GenerateJob
 from ..util import save_music_move
 
+PUBLIC_MODE_ALIASES = {
+    "drum": "drum_autofill",
+}
+
 
 def enqueue_generation_request(data):
     mode = data.get("mode", "normal")
@@ -46,7 +50,7 @@ def get_generation_status_payload(raw_body):
             return {"error": "UUID not found"}, 404
         return {
             "uuid": job.uuid,
-            "mode": job.mode,
+            "mode": _serialize_public_mode(job.mode),
             "time": job.time,
             "duration": job.duration,
             "status": job.status,
@@ -92,7 +96,7 @@ def _normalize_generation_mode(mode, cough_length):
 def _serialize_job(job):
     return {
         "uuid": job.uuid,
-        "mode": job.mode,
+        "mode": _serialize_public_mode(job.mode),
         "time": job.time,
         "duration": job.duration,
         "status": job.status,
@@ -104,3 +108,7 @@ def _serialize_queued_job(job):
     payload = _serialize_job(job)
     payload["cough_path"] = job.data.get("cough_path")
     return payload
+
+
+def _serialize_public_mode(mode):
+    return PUBLIC_MODE_ALIASES.get(mode, mode)

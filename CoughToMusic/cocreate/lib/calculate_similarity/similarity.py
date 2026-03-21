@@ -97,7 +97,6 @@ def get_midi_order(graph, target_mel, similarity_matrix, nodes):
 
     # CASE 1: If 4 nodes are connected, remove the weakest edge
     if len(largest_component) == 4:
-        print("=== CASE 1: 4 nodes connected ===")
         weakest_edge = min(edges, key=lambda x: x[2]['weight'])  # Find the lowest-weight edge
         graph.remove_edge(weakest_edge[0], weakest_edge[1])  # Remove it
 
@@ -111,7 +110,6 @@ def get_midi_order(graph, target_mel, similarity_matrix, nodes):
     except nx.exception.NetworkXNoCycle:
         cycle = None  # No cycle found
     if len(largest_component) == 3 and target_mel in largest_component:
-        print("=== CASE 2: 3 nodes connected ===")
         if subgraph.number_of_edges() == 3:
             try:
                 cycle = nx.find_cycle(subgraph)
@@ -124,7 +122,6 @@ def get_midi_order(graph, target_mel, similarity_matrix, nodes):
             cycle_edges = sorted(cycle, key=lambda x: graph[x[0]][x[1]]['weight'], reverse=True)
             ...
         else:
-            print("No cycle, using path-based ordering.")
             # fallback: get degree-1 endpoints and place the middle node accordingly
             deg = subgraph.degree()
             ends = [n for n, d in deg if d == 1]
@@ -139,7 +136,6 @@ def get_midi_order(graph, target_mel, similarity_matrix, nodes):
     # CASE 3: If 3 nodes connected but target is outside the cycle
     elif len(largest_component) == 3 and target_mel not in largest_component:
         # Find the node with highest similarity to target_mel
-        print("=== CASE 3: 3 nodes connected but target outside cycle ===")
         target_idx = nodes.index(target_mel)
         similarities = similarity_matrix[target_idx]
 
@@ -149,7 +145,6 @@ def get_midi_order(graph, target_mel, similarity_matrix, nodes):
         return [target_mel, most_similar_node]
     final_nodes = list(largest_component)
     if target_mel not in final_nodes or len(final_nodes) == 1:
-        print("=== CASE 4: Target not in largest component or only one node ===")
         target_idx = nodes.index(target_mel)
         similarities = similarity_matrix[target_idx].copy()
         similarities[target_idx] = -1  # exclude self

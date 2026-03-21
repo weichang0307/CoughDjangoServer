@@ -92,8 +92,10 @@ def generate(request):
 def generate_status_view(request):
     try:
         payload, status_code = get_generation_status_payload(request.body)
+        print("@@@@@@@@@@@ GOOOD @@@@@@@@@@@") 
         return JsonResponse(payload, safe=not isinstance(payload, list), status=status_code)
     except json.JSONDecodeError:
+        print("@@@@@@@@@@@ BAD JSON @@@@@@@@@@@") 
         return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as exc:
         print("[generate_status_view] Error:", exc)

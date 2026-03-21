@@ -15,7 +15,6 @@ class _GenerationRuntime:
     def _worker(self):
         while True:
             job = self.queue.get()
-            print(f"[Worker] Running job {job.uuid} ({job.mode})")
             self.processing_jobs.append(job)
             try:
                 job.run()
@@ -23,7 +22,6 @@ class _GenerationRuntime:
                 if job in self.processing_jobs:
                     self.processing_jobs.remove(job)
                 self.completed_jobs.append(job)
-                print(f"[Worker] Finished job {job.uuid}")
                 self.queue.task_done()
 
 

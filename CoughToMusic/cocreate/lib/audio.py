@@ -44,7 +44,6 @@ def stereo_to_mono(audio_data):
 
 
 def get_note_time(f0):
-    print("Calculating note time...")
     locker = 0
     total = 0
     time_start = []
@@ -104,7 +103,6 @@ def get_midi_length(file_path):
 
 def tempo_adjust(wavefile_time, tempo, file_name):
     midi_time = get_midi_length(file_name)
-    print(f"midi_time: {midi_time}")
     factor = midi_time / wavefile_time
     tempo_new = tempo * factor
 
@@ -192,7 +190,6 @@ def padd_to_4_seconds(audio_file):
         audio_segment.export(audio_file, format="wav")
 
 def save_audio(np_audio, output_path, sample_rate = 16000):
-    print("sample_rate:", sample_rate)
     sf.write(output_path, np_audio, sample_rate)
 
 def sound_synthesis(Db, Room_size, Damping, Wet_level, synthesized_audio, sample_rate):

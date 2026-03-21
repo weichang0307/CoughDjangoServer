@@ -1,4 +1,5 @@
 import os
+import logging
 import numpy as np
 import pandas as pd
 import librosa
@@ -9,6 +10,8 @@ from cough_to_midi.onset import *
 import audio
 import pretty_midi
 import midi
+
+logger = logging.getLogger(__name__)
 
 
 DRUM_MAPPING = {
@@ -124,7 +127,6 @@ def classify(duration_pct, loudness_pct):
 
 def classify_coughs(df):
     df["drum"] = df.apply(lambda row: classify(row["duration_percentile"], row["loudness_percentile"]), axis=1)
-    print(df)
     return df
 
 def select_related_drums(df, target_id, num):
@@ -227,11 +229,11 @@ def write_midi_pretty(selected_coughs, df, folder_path, output_midi, db_scale=30
     for drum_type, cough_id in selected_coughs.items():
         row = df[df["id"] == str(cough_id)]
         if row.empty:
-            print(f"Warning: No data found for ID {cough_id}")
+            logger.warning("No data found for ID %s", cough_id)
             continue
         audio_path = os.path.join(folder_path, f"{cough_id}.wav")
         if not os.path.exists(audio_path):
-            print(f"Warning: File {audio_path} not found.")
+            logger.warning("File %s not found.", audio_path)
             continue
         audio_data, sr = audio.load_from_file(audio_path)
         # print(f"Processing {cough_id}...", "drum_type:", drum_type)
@@ -265,7 +267,6 @@ def write_midi_pretty(selected_coughs, df, folder_path, output_midi, db_scale=30
         mid.instruments.append(drum_track)
     mid.write(output_midi)
     merge_midi_tracks(output_midi, output_midi)
-    print(f"MIDI file saved: {output_midi}")
     
     
 
@@ -284,7 +285,6 @@ def merge_midi_tracks(input_midi, output_midi):
     merged_midi = pretty_midi.PrettyMIDI()
     merged_midi.instruments.append(merged_drum_track)
     merged_midi.write(output_midi)
-    print(f"Merged MIDI saved: {output_midi}")
     # return motif_paths
 
 def generate_drum_motif(folder_path, target_id, output_midi):
@@ -293,10 +293,7 @@ def generate_drum_motif(folder_path, target_id, output_midi):
     df = normalize_and_rank(df)
     df = classify_coughs(df)
     selected_coughs = select_related_drums(df, target_id, 7)
-    print(f"Selected coughs: {selected_coughs}")
     write_midi_pretty(selected_coughs, df, folder_path, output_midi)
-    
-    print(f"Drum motif generation to {output_midi } completed.")
 
 def write_midi_pretty_manual(selected_coughs, df, cough_path_list, output_midi, db_scale=30):
     drum_mapping = {
@@ -327,11 +324,11 @@ def write_midi_pretty_manual(selected_coughs, df, cough_path_list, output_midi, 
     for drum_type, cough_id in selected_coughs.items():
         row = df[df["name"] == cough_id]  # <-- use "name" here
         if row.empty:
-            print(f"Warning: No data found for ID {cough_id}")
+            logger.warning("No data found for ID %s", cough_id)
             continue
         audio_path = id_to_path[cough_id]
         if not os.path.exists(audio_path):
-            print(f"Warning: File {audio_path} not found.")
+            logger.warning("File %s not found.", audio_path)
             continue
         audio_data, sr = audio.load_from_file(audio_path)
         onset_times = detect(audio_data, sr)
@@ -364,7 +361,6 @@ def write_midi_pretty_manual(selected_coughs, df, cough_path_list, output_midi, 
     
     mid.write(output_midi)
     merge_midi_tracks(output_midi, output_midi)
-    print(f"MIDI file saved: {output_midi}")
 
 
 
@@ -381,7 +377,7 @@ def process_manual_coughs(cough_path_list, seed=42):
         durations = compute_durations(onset_times, offset_times)
         avg_duration = np.mean(durations)
         if len(durations) == 0:
-            print(f"[警告] 無有效 duration: {file_name}")
+            logger.warning("No valid duration found for %s", file_name)
             continue
         loudness_values = [compute_loudness(audio_data[int(start * sr):int(end * sr)]) 
                            for start, end in zip(onset_times, offset_times)]
@@ -416,5 +412,4 @@ def process_manual_coughs(cough_path_list, seed=42):
         selected_coughs[drum] = name
         df.loc[df["name"] == name, "drum"] = drum
         df = df.sort_values("drum")
-    print(f'df:\n{df}')
     return selected_coughs, df

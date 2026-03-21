@@ -108,6 +108,9 @@ def save_music_move(user_id, uuid, filename_display, type):
     old_music_folder = ''
     new_music_folder = ''
 
+    if type == 'drum_autofill':
+        type = 'drum'
+
     if type == 'trio':
         #music_folder = os.path.join(user_folder, 'generated_music_cocreate')
         trio_new_fp = os.path.join(user_folder, 'generated_trio')

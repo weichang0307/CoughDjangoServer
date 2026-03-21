@@ -1,6 +1,7 @@
 
 import glob
 import os
+import logging
 import audio
 import pretty_midi
 import mido
@@ -39,7 +40,6 @@ def quantize_midi(input_midi_file, output_midi_file, num, qpm=120, ticks_per_bea
     midi_data = pretty_midi.PrettyMIDI(input_midi_file)
     note_duration = 60 / (qpm * num)
     quantization_step = note_duration 
-    print(f"Quantizing MIDI to {quantization_step} seconds")
     for instrument in midi_data.instruments:
         for note in instrument.notes:
             note.start = round(note.start / quantization_step) * quantization_step
@@ -81,17 +81,13 @@ def correct_midi_to_key(midi_data, tonic, scale_type, output_file):
             original_pitch = note.pitch
             new_pitch = move_note_to_scale(original_pitch, scale_notes)
             if original_pitch != new_pitch:
-                print(f"Correcting {midi_to_note[original_pitch % 12]} (Pitch {original_pitch}) "
-                      f"to {midi_to_note[new_pitch % 12]} (Pitch {new_pitch})")
                 note.pitch = new_pitch  # Correct the pitch
     midi_data.write(output_file)
-    print(f"Corrected MIDI file saved as {output_file}")
     
 def correct_midi_to_ref_key(midi_ref, midi_fp):
     ref_tone, ref_mode = detect_key(midi_ref)
     ref_tone = ref_tone.replace('-', '').replace('b', '').replace('#', '')
 
-    print(ref_tone, ref_mode)
     midi_data = pretty_midi.PrettyMIDI(midi_fp)
     correct_midi_to_key(midi_data, ref_tone, ref_mode, midi_fp)
 
@@ -126,9 +122,9 @@ import os
 import subprocess
 import shutil
 
-def write_from_midi(midi_file, output_file, sf="drum"):
-    print(f"Converting {midi_file} to WAV...")
+logger = logging.getLogger(__name__)
 
+def write_from_midi(midi_file, output_file, sf="drum"):
     current_path = os.getcwd()
     conda_env = os.environ.get("CONDA_PREFIX")
 
@@ -178,13 +174,12 @@ def write_from_midi(midi_file, output_file, sf="drum"):
     process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     if process.returncode != 0:
-        print(f"Error: FluidSynth exited with code {process.returncode}")
-        print(f"FluidSynth stderr: {process.stderr.strip()}")
+        logger.error("FluidSynth exited with code %s", process.returncode)
+        logger.error("FluidSynth stderr: %s", process.stderr.strip())
     elif process.stderr.strip():
-        print(f"Warning: FluidSynth stderr: {process.stderr.strip()}")
+        logger.warning("FluidSynth stderr: %s", process.stderr.strip())
     else:
         audio.gain_db_from_wav(output_file, 5)
-        print(f"WAV file successfully generated: {output_file}")
 
 
 #midi meta adjustment
@@ -303,7 +298,6 @@ def adjust_to_2bars(midi_file_path, output_file_path, ticks_per_beat=220, qpm=12
 
     # Save the adjusted MIDI file
     new_midi.save(output_file_path)
-    print(f"Adjusted MIDI saved to {output_file_path}")
 
 #midi arrangement 
 
@@ -315,7 +309,6 @@ def concatenate(midi_files, output_file_path, sec = 4.0, tpb=220, qpm=120):
     prev_total_time = 0
 
     for i, midi_file in enumerate(midi_files):
-        print(f"prev_total_time {prev_total_time}")
         mid = mido.MidiFile(midi_file)
         current_track = mid.tracks[1]
         track_time = 0
@@ -354,7 +347,7 @@ def note_density(midi_file_path):
     total_notes = len(midi_data.flat.getElementsByClass("Note"))
     total_measures = len(midi_data.getElementsByClass("Measure"))
     notes_per_measure = total_notes / total_measures
-    print(f"Note Density: {notes_per_measure} notes per measure")
+    logger.info("Note density for %s: %s notes per measure", midi_file_path, notes_per_measure)
 
 def pitch_range(midi_file_path):
     midi_data = converter.parse(midi_file_path)
@@ -363,31 +356,42 @@ def pitch_range(midi_file_path):
     lowest_pitch = min(pitches).midi
     pitch_range = highest_pitch - lowest_pitch
     average_pitch = sum(p.midi for p in pitches) / len(pitches)
-    print(f"Pitch Range: {average_pitch}")
+    logger.info("Pitch range for %s: %s", midi_file_path, average_pitch)
 
 def print_midi_information(midi_file_path):# Load the MIDI file into a NoteSequence
     note_sequece = note_seq.midi_io.midi_file_to_note_sequence(midi_file_path)
     
-    print(f"MIDI file: {midi_file_path}")
-    print(f"Ticks per quarter note: {note_sequece.ticks_per_quarter}")
-    print(f"Total time: {note_sequece.total_time} seconds")
-    print(f"qpm: {note_sequece.tempos[0].qpm}")
+    logger.info("MIDI file: %s", midi_file_path)
+    logger.info("Ticks per quarter note: %s", note_sequece.ticks_per_quarter)
+    logger.info("Total time: %s seconds", note_sequece.total_time)
+    logger.info("qpm: %s", note_sequece.tempos[0].qpm)
     
     for tempo in note_sequece.tempos:
-        print(f"Tempo: {tempo.qpm} BPM at time {tempo.time}")
+        logger.info("Tempo: %s BPM at time %s", tempo.qpm, tempo.time)
     for time_signature in note_sequece.time_signatures:
-        print(f"Time signature: {time_signature.numerator}/{time_signature.denominator} at time {time_signature.time}")
+        logger.info(
+            "Time signature: %s/%s at time %s",
+            time_signature.numerator,
+            time_signature.denominator,
+            time_signature.time,
+        )
     for key_signature in note_sequece.key_signatures:
-        print(f"Key signature: {key_signature.key} at time {key_signature.time}")
-    print(f"Number of notes: {len(note_sequece.notes)}")
+        logger.info("Key signature: %s at time %s", key_signature.key, key_signature.time)
+    logger.info("Number of notes: %s", len(note_sequece.notes))
     for note in note_sequece.notes:
-        print(f"Pitch {note.pitch}, Velocity {note.velocity}, "
-              f"Note {pitch_to_note(note.pitch)}, "
-              f"Start time {note.start_time}, End time {note.end_time}, "
-              f"Instrument {note.instrument}, Program {note.program}")
-    print(f"Number of instruments: {len(note_sequece.instrument_infos)}")
+        logger.info(
+            "Pitch %s, Velocity %s, Note %s, Start time %s, End time %s, Instrument %s, Program %s",
+            note.pitch,
+            note.velocity,
+            pitch_to_note(note.pitch),
+            note.start_time,
+            note.end_time,
+            note.instrument,
+            note.program,
+        )
+    logger.info("Number of instruments: %s", len(note_sequece.instrument_infos))
     for instrument_info in note_sequece.instrument_infos:
-        print(f"Instrument name: {instrument_info.name}, Instrument {instrument_info.instrument}")
+        logger.info("Instrument name: %s, Instrument %s", instrument_info.name, instrument_info.instrument)
 
 def note_shift(midi_file_path, desired_key):
     midi_stream = converter.parse(midi_file_path)

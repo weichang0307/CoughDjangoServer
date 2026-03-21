@@ -2,6 +2,7 @@ import crepe
 import numpy as np
 import librosa
 import math
+import logging
 from midiutil import MIDIFile
 import os
 import sys
@@ -11,10 +12,11 @@ if parent_dir not in sys.path:
 import audio
 from cough_to_midi import onset
 
+logger = logging.getLogger(__name__)
+
 
 
 def get_by_crepe(audio_data, sr, threshold, energy_threshold, energy_filter = True):
-    print("Estimating pitch with CREPE...")
     time, frequency, confidence, _ = crepe.predict(audio_data, sr=sr, viterbi=True)
     frequency = np.where(confidence < threshold, np.nan, frequency)
     if energy_filter == True:
@@ -95,24 +97,19 @@ def write_midi(audio_data, sample_rate, audio_freq, filename,
     tempo = audio.get_tempo(audio_data, sample_rate)
     if tempo <= 0:
         tempo = 120
-    
-    print("Converting to MIDI...")
-    
+
     if onset_seg:
-        print("Using onset segmentation...")
         onset_time = onset.detect(audio_data, sample_rate)
-        print(f"Onset times: {onset_time}")
         audio_duration = audio.get_duration(audio_data, sample_rate)
-        print(f"Audio duration: {audio_duration} seconds")
 
         result_array, notes_on_frame, notes_off_frame = to_note_msg(
             onset_time, f0_scaled, freq_range_th, note_interval_th, break_th, audio_duration)
 
         if not result_array or all(p <= 1e-3 for p in result_array):
             if fallback_used:
-                print(f"[ERROR] Fallback config also failed. Skipping {filename}.")
+                logger.error("Fallback config also failed. Skipping %s.", filename)
                 return False
-            print(f"[WARNING] Pitch tracking failed. Retrying with fallback config...")
+            logger.warning("Pitch tracking failed. Retrying with fallback config...")
             fallback_config = {
                 "threshold": 0.1,
                 "freq_range_th": 0.45,
@@ -125,15 +122,9 @@ def write_midi(audio_data, sample_rate, audio_freq, filename,
                               fallback_config["min_target"], fallback_config["max_target"],
                               fallback_config["freq_range_th"], fallback_config["note_interval_th"],
                               break_th, onset_seg, fallback_used=True)
-
-        print(f"Result array: {result_array}", 
-              f"Notes on frame: {notes_on_frame}", 
-              f"Notes off frame: {notes_off_frame}")
         time_start_array_nstd, time_end_array_nstd = timeframes_to_sec(notes_on_frame, notes_off_frame, audio_duration / len(f0))
-        print(f"Time start array: {time_start_array_nstd}", 
-              f"Time end array: {time_end_array_nstd}")
     if len(result_array) == 0 or len(notes_on_frame) == 0 or len(notes_off_frame) == 0:
-        print(f"Skipping file {filename} due to insufficient valid pitch data.")
+        logger.warning("Skipping file %s due to insufficient valid pitch data.", filename)
         return False
 
     def add_notes_to_midi(midi, time_start_array, time_end_array, result_array):
@@ -158,20 +149,18 @@ def write_midi(audio_data, sample_rate, audio_freq, filename,
     try:
         new_tempo = audio.tempo_adjust(audio_duration, tempo, filename)
     except ValueError as e:
-        print(f"Error adjusting tempo: {e}")
+        logger.exception("Error adjusting tempo for %s", filename)
         return False
 
     midi = MIDIFile(1)
     midi.addTrackName(0, 0, "Sample Track")
     midi.addTempo(0, 0, new_tempo)
-    print(f"New tempo: {new_tempo}")
     add_notes_to_midi(midi, time_start_array_nstd, time_end_array_nstd, result_array)
 
     with open(f"{filename}", "wb") as output_file:
         midi.writeFile(output_file)
 
     time = audio.get_midi_length(filename)
-    print(f"File {filename} created successfully!")
 
     return True
 

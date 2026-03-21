@@ -235,6 +235,11 @@ Repo helper:
 .\runserver.ps1
 ```
 
+Request logging:
+
+- the Django middleware stack prints each incoming request method, path, response status, and elapsed time to stdout
+- this is useful for tracing which backend API routes the frontend is actually hitting during debugging
+
 ## Environment Requirements
 
 This repo appears to depend on two Python environments:
@@ -341,6 +346,13 @@ The active co-create request flow is:
 8. The `cocreate/lib/` code reads cough WAVs, shared public cough assets, model checkpoints, and soundfonts, then writes MIDI and rendered WAV artifacts into mode-specific temp folders.
 9. The client polls `generate_status_view` and receives the generated temp artifact paths from the in-memory job result.
 10. The active finalize path is `save_music`, which moves co-create temp outputs into permanent `generated_*` folders and appends metadata to the standard music table.
+
+Client-compatibility note:
+
+- the runtime and storage layers still use internal mode `drum` for drum autofill
+- `generate_status_view` serializes that mode back to `drum_autofill` for frontend compatibility
+- `save_music` accepts either `drum` or `drum_autofill` for the autofill-drum finalize path
+- drum autofill `used_public_paths` is the sampled public-only subset, and the workflow rejects payloads whose count does not match `7 - len(user coughs)`
 
 The current library split is:
 

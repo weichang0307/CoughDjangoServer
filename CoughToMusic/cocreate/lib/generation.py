@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 import copy
 import os
+import logging
 import sys
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if parent_dir not in sys.path:
@@ -16,6 +17,8 @@ import mido as md
 import midi
 from pathlib import Path
 from note_seq.protobuf import music_pb2
+
+logger = logging.getLogger(__name__)
 
 """
 HELPER FUNCTIONS
@@ -47,12 +50,10 @@ def create_tensor_from_sequence(note_seq):
     return new_note_sequence
 
 def path_to_note_seq(midi_path_start, midi_path_end):
-    print("Converting to NoteSequence...", end="")
     start_pm = pretty_midi.PrettyMIDI(midi_path_start)
     end_pm = pretty_midi.PrettyMIDI(midi_path_end)
     start_note_seq = mm.midi_to_note_sequence(start_pm)
     end_note_seq = mm.midi_to_note_sequence(end_pm)
-    print("Done")
     return start_note_seq, end_note_seq
 
 def normalize_sequence_duration(note_seq, target_duration=4.0):
@@ -97,10 +98,8 @@ def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_
             [start_note_seq.total_time]
             + [seq.total_time for seq in interp_note_seq]+ [end_note_seq.total_time]
         )
-    print(f'all_seq:', all_seq)
     final_seq = mm.sequences_lib.concatenate_sequences(all_seq, seq_durations)
     mm.sequence_proto_to_midi_file(final_seq, output_path)
-    print(f"Interpolated MIDI file has been saved to: {output_path}")
 
 
 # def concatenate_midi(sequences, output_path, segment_duration=4.0):
@@ -264,7 +263,6 @@ def ensure_min_note_density(note_seq, min_notes, total_time=4.0):
         note.program = 0
 
     note_seq.total_time = max(note.end_time for note in note_seq.notes)
-    print(f'modify to {len(note_seq.notes)} notes, total time: {note_seq.total_time}')
     return note_seq
 
 
@@ -307,17 +305,17 @@ def interpolate_melody_tensors(
         e_tensors = e_input_output[0] if e_input_output[0] else e_input_output[1]
         end_tensors = data_converter.from_tensors(e_tensors)
     except Exception as e:
-        print(f"Error converting to tensors: {e}")
+        logger.exception("Error converting to tensors")
 
 
     # fallback if either list is empty
     if not start_tensors and not end_tensors:
         raise ValueError("Both start and end tensors are empty. Cannot interpolate.")
     elif not start_tensors:
-        print("Start tensors empty. Using end tensor for both start and end.")
+        logger.warning("Start tensors empty. Using end tensor for both start and end.")
         start_tensors = end_tensors
     elif not end_tensors:
-        print("End tensors empty. Using start tensor for both start and end.")
+        logger.warning("End tensors empty. Using start tensor for both start and end.")
         end_tensors = start_tensors
 
     start_tensor = next((t for t in start_tensors if t.total_time > 3.5), start_tensors[0])
@@ -332,7 +330,7 @@ def interpolate_melody_tensors(
             temperature=temperature,
         )
     except Exception as e:
-        print(f"Interpolation failed: {e}")
+        logger.exception("Interpolation failed")
 
     return note_sequences
 
@@ -343,9 +341,6 @@ def melody_interpolation(start_midi_path, end_midi_path, interp_output_path , nu
     interpolated_seq = interpolate_melody_tensors(
         start_note_seq, end_note_seq, num_steps, config_name="cat-mel_2bar_big"
     )
-    print("interpolated_seq type:", type(interpolated_seq))
-    print("interpolated_seq length:", len(interpolated_seq))
-    print("interpolated_seq:", interpolated_seq)
 
     if is_first == True:
         concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path)
@@ -358,7 +353,6 @@ def melody_interpolation(start_midi_path, end_midi_path, interp_output_path , nu
         first_inp_note_seq = mm.midi_to_note_sequence(first_inp_mid)
         concate_interpolation(first_inp_note_seq, is_first, interpolated_seq, interp_output_path)
     note_seq.midi_io.midi_file_to_note_sequence(interp_output_path)
-    print("melody interpolate generated")
     # return interpolated_note_sequence
 
 
@@ -371,13 +365,10 @@ def generate_melody_from_sequence(sequence, interp_output_path):
     # Generate interpolations in order
     for i in range(len(sequence)):
         start_midi_path = sequence[i]
-        print("start_midi_path:", start_midi_path)
         end_midi_path = sequence[(i + 1) % len(sequence)]
-        print("end_midi_path:", end_midi_path)
         is_first = True if i == 0 else (None if i == len(sequence) - 1 else False)
         # print('f{num_steps[i]}:', num_steps[i])
         melody_interpolation(start_midi_path, end_midi_path, interp_output_path, num_steps[i], is_first)
-    print("Melody generation completed.")
 
 """
 DRUM ACCOMPANIMENT GENERATION, DRUM INTERPOLATION , GENERATE GROOVE VARIATION FUNCTIONS"""
@@ -506,7 +497,6 @@ def generate_humanize_groove(mid_pth, output_pth):
     combined_seq.tempos.add(qpm=original_seq.tempos[0].qpm if original_seq.tempos else 120.0)
     
     note_seq.sequence_proto_to_midi_file(combined_seq, output_pth)
-    print(f"Saved concatenated original + humanized drum MIDI to {output_pth}")
 
 
 def interpolated_groove(start_path, end_path, interp_output_path, steps =2):

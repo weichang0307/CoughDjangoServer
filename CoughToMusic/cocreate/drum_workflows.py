@@ -19,15 +19,22 @@ def run_drum_manual(request: CoCreateRequest):
 
 def run_drum_autofill(request: CoCreateRequest):
     user_tmp_folder = ensure_temp_folder(request.user_id, "drum")
-    generated_path, used_public_paths, drum_motif_wavs = generate_autofill_drum(
+    autofill_result = generate_autofill_drum(
         request.coughlist,
         user_tmp_folder,
         request.job_uuid,
     )
+    expected_public_count = max(0, 7 - len(request.coughlist))
+    if len(autofill_result.used_public_paths) != expected_public_count:
+        raise ValueError(
+            f"Drum autofill expected {expected_public_count} public cough paths but got "
+            f"{len(autofill_result.used_public_paths)}."
+        )
+
     return create_result(
-        generated_music=generated_path,
+        generated_music=autofill_result.generated_music,
         cough_paths=request.cough_paths,
-        cough_motifs=list(drum_motif_wavs[: len(request.coughlist)]),
-        used_public_paths=[Path(path) for path in used_public_paths],
-        used_motif_paths=list(drum_motif_wavs[len(request.coughlist) :]),
+        cough_motifs=list(autofill_result.motif_paths[: len(request.coughlist)]),
+        used_public_paths=[Path(path) for path in autofill_result.used_public_paths],
+        used_motif_paths=list(autofill_result.motif_paths[len(request.coughlist) :]),
     )

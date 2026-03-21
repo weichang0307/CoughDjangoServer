@@ -34,10 +34,6 @@ def generate_midi_sequence(target_midi_file, folder_path):
     # Sort similarity scores in descending order
     similarity_scores.sort(key=lambda x: x[1], reverse=True)
 
-    print("Top Similar MIDI Files:")
-    for filename, similarity in similarity_scores[:3]:
-        print(f"{filename}: {similarity:.4f}")
-
     # Get the top 3 similar MIDI files
     top_three_files = [os.path.join(folder_path, x[0]) for x in similarity_scores[:3]]
 
@@ -56,10 +52,8 @@ def generate_midi_sequence(target_midi_file, folder_path):
 
     # Get MIDI order based on the graph structure
     midi_order_filenames = get_midi_order(graph, os.path.basename(target_midi_file), similarity_matrix, nodes)
-    print("MIDI Order Filenames:", midi_order_filenames)
     # Convert filenames back to MIDI IDs
     midi_order = [int(f.replace("mel_", "").replace(".mid", "")) for f in midi_order_filenames]
 
-    print("Final MIDI Order:", midi_order)
     return midi_order
 

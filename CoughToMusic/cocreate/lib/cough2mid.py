@@ -4,6 +4,7 @@ import glob
 import os
 import random
 import itertools
+import logging
 import numpy as np
 import soundfile as sf
 from music21 import converter, key, interval
@@ -11,6 +12,8 @@ import pretty_midi
 from pathlib import Path
 import librosa
 import audio
+
+logger = logging.getLogger(__name__)
 def normalize_wav_length(input_path, output_path, target_length_sec):
 
     y, sr = librosa.load(input_path, sr=None)   
@@ -48,7 +51,6 @@ def cough_to_midi_wavs(
                 midi.correct_midi_to_ref_key(ref_file, midi_file)
             output_path = str(Path(out_dir) / f"{folder_path}_wav" / f"{folder_path}_{file_index}.wav")
             midi.write_from_midi(midi_file, output_path, "piano")
-            print(f"Wrote {output_path}")
 
 
 def cough2midi(cough_pth, motif_pth, threshold, freq_range_th, note_interval_th,
@@ -62,9 +64,9 @@ def cough2midi(cough_pth, motif_pth, threshold, freq_range_th, note_interval_th,
 
     if not cough_freq:
         if tried_fallback:
-            print("No frequency detected even with fallback threshold. Aborting.")
+            logger.warning("No frequency detected even with fallback threshold. Aborting.")
             return False
-        print("No frequency detected in the cough audio. Retrying with fallback threshold = 0.1.")
+        logger.warning("No frequency detected in the cough audio. Retrying with fallback threshold = 0.1.")
         return cough2midi(cough_pth, motif_pth, 0.1, freq_range_th, note_interval_th,
                           min_target, max_target, energy_th, tried_fallback=True)
     
@@ -73,9 +75,9 @@ def cough2midi(cough_pth, motif_pth, threshold, freq_range_th, note_interval_th,
     
     if not success:
         if tried_fallback:
-            print("write_midi failed even with fallback threshold. Aborting.")
+            logger.warning("write_midi failed even with fallback threshold. Aborting.")
             return False
-        print("write_midi failed. Retrying with fallback threshold = 0.2.")
+        logger.warning("write_midi failed. Retrying with fallback threshold = 0.2.")
         return cough2midi(cough_pth, motif_pth, 0.2, freq_range_th, note_interval_th,
                           min_target, max_target, energy_th, tried_fallback=True)
 

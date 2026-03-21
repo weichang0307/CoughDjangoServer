@@ -1,5 +1,6 @@
 import csv
 import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -112,6 +113,7 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
     def test_drum_workflows_delegate_to_drum_adapters(self):
         from CoughToMusic.cocreate import drum_workflows
         from CoughToMusic.cocreate.contracts import CoCreateRequest
+        from CoughToMusic.cocreate.drum_adapters import DrumAutofillResult
 
         request = CoCreateRequest(
             mode="drum",
@@ -122,15 +124,139 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
 
         with patch("CoughToMusic.cocreate.drum_workflows.ensure_temp_folder", return_value="temp_drum"), patch(
             "CoughToMusic.cocreate.drum_workflows.generate_autofill_drum",
-            return_value=("generated.wav", ["public.wav"], ["motif0.wav", "motif1.wav"]),
+            return_value=DrumAutofillResult(
+                generated_music="generated.wav",
+                used_public_paths=[
+                    "public-1.wav",
+                    "public-2.wav",
+                    "public-3.wav",
+                    "public-4.wav",
+                    "public-5.wav",
+                    "public-6.wav",
+                ],
+                motif_paths=[
+                    "motif0.wav",
+                    "motif1.wav",
+                    "motif2.wav",
+                    "motif3.wav",
+                    "motif4.wav",
+                    "motif5.wav",
+                    "motif6.wav",
+                ],
+            ),
         ):
             result = drum_workflows.run_drum_autofill(request)
 
         payload = result.to_payload()
         self.assertEqual(payload["generated_music"], "generated.wav")
         self.assertEqual(payload["cough_motifs"], ["motif0.wav"])
-        self.assertEqual(payload["used_public_paths"], ["public.wav"])
-        self.assertEqual(payload["used_motif_paths"], ["motif1.wav"])
+        self.assertEqual(
+            payload["used_public_paths"],
+            [
+                "public-1.wav",
+                "public-2.wav",
+                "public-3.wav",
+                "public-4.wav",
+                "public-5.wav",
+                "public-6.wav",
+            ],
+        )
+        self.assertEqual(
+            payload["used_motif_paths"],
+            [
+                "motif1.wav",
+                "motif2.wav",
+                "motif3.wav",
+                "motif4.wav",
+                "motif5.wav",
+                "motif6.wav",
+            ],
+        )
+
+    def test_drum_workflow_rejects_wrong_public_path_count(self):
+        from CoughToMusic.cocreate import drum_workflows
+        from CoughToMusic.cocreate.contracts import CoCreateRequest
+        from CoughToMusic.cocreate.drum_adapters import DrumAutofillResult
+
+        request = CoCreateRequest(
+            mode="drum",
+            user_id="refactor-user",
+            job_uuid="drum-uuid",
+            coughlist=[
+                Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "cough-1.wav",
+                Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "cough-2.wav",
+                Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "cough-3.wav",
+                Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "cough-4.wav",
+            ],
+        )
+
+        with patch("CoughToMusic.cocreate.drum_workflows.ensure_temp_folder", return_value="temp_drum"), patch(
+            "CoughToMusic.cocreate.drum_workflows.generate_autofill_drum",
+            return_value=DrumAutofillResult(
+                generated_music="generated.wav",
+                used_public_paths=["public-1.wav", "public-2.wav", "public-3.wav", "public-4.wav"],
+                motif_paths=["m0.wav", "m1.wav", "m2.wav", "m3.wav", "m4.wav", "m5.wav", "m6.wav"],
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "expected 3 public cough paths but got 4"):
+                drum_workflows.run_drum_autofill(request)
+
+    def test_generate_autofill_drum_returns_only_sampled_public_paths(self):
+        from CoughToMusic.cocreate import drum_adapters
+        from CoughToMusic.cocreate.drum_adapters import DrumAutofillResult
+
+        user_coughs = [
+            Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "user-1.wav",
+            Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "user-2.wav",
+            Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "user-3.wav",
+            Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "user-4.wav",
+        ]
+        used_public_paths = ["public-1.wav", "public-2.wav", "public-3.wav"]
+        selected_coughs = {
+            "kick": "user-1",
+            "snare": "user-2",
+            "closed_hihat": "user-3",
+            "open_hihat": "user-4",
+            "mid_tom": "public-1",
+            "low_tom": "public-2",
+            "crash": "public-3",
+        }
+
+        midi_module = types.SimpleNamespace(
+            adjust_to_2bars=lambda *args, **kwargs: None,
+            write_from_midi=lambda *args, **kwargs: None,
+            snap_on_grid_noteseq=lambda *args, **kwargs: None,
+            concatenate=lambda *args, **kwargs: None,
+        )
+        drum_module = types.ModuleType("CoughToMusic.cocreate.lib.drum")
+        drum_module.process_autofill_coughs = lambda *args, **kwargs: (
+            selected_coughs,
+            object(),
+            {name: f"path-for-{name}.wav" for name in selected_coughs.values()},
+            used_public_paths,
+        )
+        drum_module.write_midi_pretty_manual = lambda *args, **kwargs: None
+        generation_module = types.ModuleType("CoughToMusic.cocreate.lib.generation")
+        generation_module.concatenate_sequences = lambda *args, **kwargs: None
+        generation_module.concate_interpolation = lambda *args, **kwargs: None
+        generation_module.interpolated_groove = lambda *args, **kwargs: "interp.mid"
+        generation_module.path_to_note_seq = lambda *args, **kwargs: ("start", "end")
+        lib_module = types.ModuleType("CoughToMusic.cocreate.lib")
+        lib_module.midi = midi_module
+
+        with patch.dict(
+            sys.modules,
+            {
+                "CoughToMusic.cocreate.lib": lib_module,
+                "CoughToMusic.cocreate.lib.drum": drum_module,
+                "CoughToMusic.cocreate.lib.generation": generation_module,
+            },
+        ):
+            result = drum_adapters.generate_autofill_drum(user_coughs, "temp_drum", "job-1")
+
+        self.assertIsInstance(result, DrumAutofillResult)
+        self.assertEqual(result.used_public_paths, used_public_paths)
+        self.assertEqual(result.generated_music, str(Path("temp_drum") / "job-1_drum.wav"))
 
     def test_cocreate_package_exports_contracts_only(self):
         from CoughToMusic import cocreate
@@ -241,3 +367,19 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
                 self.assertFalse(source_file.exists())
 
         self.assertEqual(update_table.call_count, len(cases))
+
+    def test_save_music_move_accepts_legacy_drum_autofill_type(self):
+        from CoughToMusic.util import save_music_move
+
+        user_id = "refactor-user"
+        temp_folder = Path(self._temp_media_path) / user_id / "temp_autofill_drum"
+        temp_folder.mkdir(parents=True, exist_ok=True)
+        source_file = temp_folder / "job-1_drum.wav"
+        source_file.write_bytes(b"wave")
+
+        with patch("builtins.print"), patch("CoughToMusic.util.update_music_table"):
+            save_music_move(user_id, "job-1", "song", "drum_autofill")
+
+        expected_file = Path(self._temp_media_path) / user_id / "generated_autofill_drum" / "song" / "song_drum.wav"
+        self.assertTrue(expected_file.exists(), expected_file)
+        self.assertFalse(source_file.exists())
