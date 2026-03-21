@@ -23,12 +23,9 @@ from .users import (
     stop_record,
     submit_survey,
 )
-from ..util import classify_cough_event, clustering
 
 __all__ = [
     "clean_temper",
-    "classify_cough_event",
-    "clustering",
     "create_cough_audio",
     "delete_music",
     "generate",

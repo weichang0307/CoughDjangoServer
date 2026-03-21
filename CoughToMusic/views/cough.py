@@ -7,8 +7,6 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from ..services.uploads import process_cough_upload, save_template_audio
-
 
 def _is_people_row(value):
     if pd.isna(value):
@@ -60,6 +58,8 @@ def set_template(request):
         return JsonResponse({"error": "Invalid request method"}, status=400)
 
     try:
+        from ..services.uploads import save_template_audio
+
         metadata = request.POST.get("metadata")
         metadata_dict = json.loads(metadata)
         audio_file = request.FILES.get("file")
@@ -77,6 +77,8 @@ def create_cough_audio(request):
         return JsonResponse({"error": "Invalid request method"}, status=400)
 
     try:
+        from ..services.uploads import process_cough_upload
+
         metadata = request.POST.get("metadata")
         metadata_dict = json.loads(metadata)
         audio_file = request.FILES.get("file")

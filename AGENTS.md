@@ -4,7 +4,7 @@ This file is for coding agents working in this repository.
 
 ## Maintenance Rule
 
-Keep both `README.md` and `AGENTS.md` up to date whenever changes materially affect:
+Keep `README.md`, `AGENTS.md`, and `archive/ARCHIVE.md` up to date whenever changes materially affect:
 
 - architecture or dataflow
 - setup or runtime requirements
@@ -12,8 +12,17 @@ Keep both `README.md` and `AGENTS.md` up to date whenever changes materially aff
 - background job behavior
 - worker/subprocess contracts
 - development or verification workflow
+- archived or retired code paths
 
-If your code change would make either document misleading, update the document in the same task.
+If your code change would make any of those documents misleading, update them in the same task.
+
+If a file or function is retired:
+
+- move retired files into `archive/` when practical instead of leaving dead code in the active tree
+- record the decision in `archive/ARCHIVE.md`
+- update references in tests and docs so the active architecture description stays accurate
+
+Treat `README.md` as the default concise repo guide for routine agent work. `DIAGRAMS.md` is a human-oriented companion for visual architecture and dataflow diagrams, so agents usually do not need to read or update it unless a change materially affects structure, subsystem boundaries, or the documented request/dataflow.
 
 ## Mission
 
@@ -39,7 +48,6 @@ Core helpers:
 - `CoughToMusic/cocreate/contracts.py`
 - `CoughToMusic/cocreate/storage.py`
 - `CoughToMusic/cocreate/workflows.py`
-- `CoughToMusic/co_create_utils.py` is legacy compatibility code and `save_final_cocreate(...)` now emits a deprecation warning when used
 
 Runtime settings:
 
@@ -88,6 +96,7 @@ Finalize:
 Readback:
 
 - `get_coughs`, `get_music`, and `get_uploads_file` expose saved artifacts
+- user/library routed endpoints now live directly in `CoughToMusic/views/users.py` and `CoughToMusic/views/library.py`, with shared CSV/file helpers in `CoughToMusic/services/users.py` and `CoughToMusic/services/library.py`
 
 ## Key Paths
 
@@ -170,7 +179,7 @@ Usually safe when scoped and verified:
 - path and save/move rules in `CoughToMusic/util.py`
 - cocreate application-layer helpers in `CoughToMusic/cocreate/storage.py` and `CoughToMusic/cocreate/workflows.py`
 - mode-specific generation in `CoughToMusic/services/generation_modes.py`
-- co-create compatibility helpers in `CoughToMusic/co_create_utils.py`
+- archival documentation and retired-code moves under `archive/`
 
 Higher risk:
 
@@ -219,8 +228,19 @@ For rename/delete changes:
 Be skeptical of existing tests:
 
 - `CoughToMusic/tests.py` now includes request-level coverage for failed-then-successful upload behavior around the filter wrapper
+- `CoughToMusic/tests.py` also covers the migrated modular user/library endpoints, including CSV update behavior, file streaming, rename/delete alignment, and shared public upload writes
 - `CoughToMusic/tests.py` uses repo-local `media/test_media_<uuid>/` scratch directories for upload tests because Python `tempfile` directories were not writable for nested paths under the Windows Django test process in this workspace
-- `test.py` appears stale
+- `CoughToMusic/tests.py` includes an import-safety probe for `CoughToMusic.views` so modular view imports stay lightweight
+- stale ad hoc scripts and orphaned modules are archive candidates once confirmed to have no live callers
+
+## Archive Policy
+
+Use `archive/` for retired code that is intentionally preserved for reference.
+
+- `archive/ARCHIVE.md` is the source of truth for why code was retired and what replaced it
+- archive code only after confirming there are no live imports, URLs, or worker paths that still rely on it
+- when retiring a function inside an otherwise-active file, prefer deleting it; if the old implementation needs to be preserved, move that implementation into an archived module and log it
+- do not describe archived code as part of the active request path
 
 ## Environment Notes
 

@@ -6,7 +6,7 @@ This repo looks like a normal Django project, but the important application stat
 
 ## Documentation Maintenance
 
-Keep this `README.md` up to date when changes materially affect:
+Keep this `README.md`, `AGENTS.md`, and `archive/ARCHIVE.md` up to date when changes materially affect:
 
 - project purpose or scope
 - request/dataflow
@@ -14,8 +14,13 @@ Keep this `README.md` up to date when changes materially affect:
 - runtime setup
 - generation modes
 - operational caveats
+- archived or retired code paths
 
-If you change the repo in a way that would mislead a new contributor reading this file, update this file in the same task.
+If you retire a file or function, do not leave it floating in the active tree as undocumented dead code. Move retired files into `archive/` when practical, record the decision in `archive/ARCHIVE.md`, and update this file in the same task if the architectural description changes.
+
+Human-oriented system diagrams live in `DIAGRAMS.md`.
+
+For routine agent work, treat this `README.md` as the default repo guide. `DIAGRAMS.md` is a companion document for human-readable architecture visuals and usually only needs to be read or updated when a change materially affects structure, subsystem boundaries, or request/dataflow diagrams.
 
 ## What It Does
 
@@ -42,7 +47,11 @@ Main app:
 - `CoughToMusic/util.py`
 - `CoughToMusic/task.py`
 - `CoughToMusic/table.py`
-- `CoughToMusic/co_create_utils.py`
+
+Archive:
+
+- `archive/ARCHIVE.md`
+- `archive/CoughToMusic/`
 
 Worker boundary:
 
@@ -73,93 +82,11 @@ Mental model:
 - controller, service, and runtime code are split by responsibility so lightweight imports stay cheap.
 - heavy audio and generation libraries are loaded lazily where practical so simple requests and tests do not pay their import cost up front.
 
-## System Diagram
+Architecture and request-flow diagrams are in `DIAGRAMS.md`:
 
-```mermaid
-flowchart TD
-    client["Client App"]
-
-    subgraph django["Django Request Layer"]
-        urls["CoughToMusic/urls.py"]
-
-        subgraph views["CoughToMusic/views/"]
-            users_view["users.py\nsign_up"]
-            cough_view["cough.py\ncreate_cough_audio\nget_coughs"]
-            gen_view["generation.py\ngenerate\ngenerate_status_view\nsave_music\nsave_music_cocreate"]
-            library_view["library.py\nget_music\nget_uploads_file\nother library/readback endpoints"]
-        end
-
-        users_service["services/users.py"]
-        uploads_service["services/uploads.py"]
-        generation_service["services/generation.py"]
-        legacy_views["views_legacy.py\nlegacy readback/library implementation"]
-    end
-
-    subgraph worker["Subprocess Worker Boundary"]
-        util_helpers["util.py\nfilter_coughs\nclassify_cough_event\nclustering"]
-        runner["utils/runner.py\nrun_cli"]
-        yamnet["yamnet_worker/run_yamnet_worker.py\nfilter/classify/cluster"]
-    end
-
-    subgraph runtime["In-Memory Generation Runtime"]
-        queue["runtime/generation_queue.py\nQueue plus lazy daemon thread"]
-        job["task.py\nGenerateJob"]
-        modes["services/generation_modes.py\nmode-specific generation"]
-    end
-
-    subgraph storage["Filesystem plus CSV State Under media/"]
-        user_csv["media/{user}/{user}.csv\nuser metadata"]
-        cough_audio["media/{user}/cough_audio/*.wav"]
-        cough_csv["media/{user}/cough_audio/cough_table.csv"]
-        public_cough["media/public_cough/*.wav"]
-        temp_outputs["media/{user}/temp_*"]
-        final_outputs["media/{user}/generated_*"]
-        music_csv["media/{user}/generated_music/music_table.csv"]
-    end
-
-    client --> urls
-    urls --> users_view
-    urls --> cough_view
-    urls --> gen_view
-    urls --> library_view
-
-    users_view --> users_service
-    users_service --> user_csv
-
-    cough_view --> uploads_service
-    uploads_service --> cough_audio
-    uploads_service --> util_helpers
-    util_helpers --> runner
-    runner --> yamnet
-    yamnet --> runner
-    runner --> util_helpers
-    uploads_service --> cough_csv
-    uploads_service --> public_cough
-
-    gen_view --> generation_service
-    generation_service --> queue
-    queue --> job
-    job --> modes
-    modes --> temp_outputs
-    gen_view --> queue
-    generation_service --> final_outputs
-    generation_service --> music_csv
-
-    library_view --> legacy_views
-    legacy_views --> cough_audio
-    legacy_views --> final_outputs
-    legacy_views --> cough_csv
-    legacy_views --> music_csv
-```
-
-Reading the diagram from top to bottom:
-
-- the client talks only to Django endpoints
-- routed views are split between newer `views -> services` flows and a remaining `views -> views_legacy.py` readback/library path
-- Django writes durable files and CSVs under `media/`
-- filtering, classification, and clustering cross into a separate worker process
-- generation is queued in memory and processed by a background runtime worker that starts lazily
-- final outputs are moved from temp folders into permanent user folders
+- system overview
+- YAMNet worker upload path
+- co-create generation flow
 
 ## Request Flow By Area
 
@@ -184,7 +111,7 @@ Generation:
 Readback:
 
 - `get_coughs` now lives directly in `CoughToMusic/views/cough.py`.
-- `get_music`, `get_uploads_file`, and several library/statistics endpoints still pass through `CoughToMusic/views/library.py` into `CoughToMusic/views_legacy.py`.
+- `get_music`, `get_uploads_file`, statistics endpoints, and library mutation endpoints now live directly in `CoughToMusic/views/library.py`, with CSV/file helpers in `CoughToMusic/services/library.py`.
 
 Finalize:
 
@@ -201,52 +128,7 @@ Instead:
 - The worker uses the dedicated interpreter configured by `YAMNET_PYTHON_EXE` in `CoughToMusicDjango/settings.py`.
 - Inside the worker, `yamnet_loader.py` lazily loads the model weights from `CoughToMusic/keras_yamnet/yamnet.h5` and caches the model in-process.
 
-```mermaid
-flowchart TD
-    upload["Client upload request"]
-    view["views/cough.py\ncreate_cough_audio"]
-    service["services/uploads.py\nprocess_cough_upload"]
-    wav["media/{user}/cough_audio/{name}.wav"]
-
-    subgraph django["Django process"]
-        filter_call["util.py\nfilter_coughs\nmode=filter"]
-        classify_call["util.py\nclassify_cough_event\nmode=classify"]
-        cluster_call["util.py\nclustering\nmode=cluster"]
-        cough_csv["media/{user}/cough_audio/cough_table.csv"]
-        public_cough["media/public_cough/*.wav"]
-        split_wavs["media/{user}/cough_audio/{name}_1.wav\nmedia/{user}/cough_audio/{name}_2.wav"]
-        realtime["runtime enqueue\nrealtime mode only"]
-    end
-
-    subgraph worker["YAMNet worker subprocess"]
-        entry["run_yamnet_worker.py"]
-        loader["yamnet_loader.py\nload yamnet.h5 once per worker process"]
-        filter_mode["filter_core.py\nread wav -> detect cough -> rewrite wav"]
-        classify_mode["cough_cluster_core.py\nextract features -> classify user/non-user"]
-        cluster_mode["cough_cluster_core.py\nextract features -> assign cluster_id"]
-    end
-
-    upload --> view --> service --> wav
-    service --> filter_call --> entry
-    entry --> loader
-    entry --> filter_mode
-    filter_mode --> wav
-
-    service --> classify_call --> entry
-    entry --> classify_mode
-    classify_mode --> split_wavs
-
-    service --> cluster_call --> entry
-    entry --> cluster_mode
-
-    classify_mode -. JSON flags and separated arrays .-> service
-    cluster_mode -. JSON cluster_id .-> service
-    filter_mode -. JSON segment metadata .-> service
-
-    service --> cough_csv
-    service --> public_cough
-    service --> realtime
-```
+The companion diagram for this flow is in `DIAGRAMS.md`.
 
 The upload-to-worker flow is:
 
@@ -403,13 +285,18 @@ There is no built-in backup system for uploaded inputs.
 
 ## Verification Reality
 
-Automated coverage is still limited, but `CoughToMusic/tests.py` now includes request-level coverage for failed-then-successful upload behavior around the filter wrapper plus focused startup probes for helper imports.
+`CoughToMusic/tests.py` now includes request-level coverage for upload filtering isolation, modular user/library endpoint migration behavior, and focused startup probes for helper imports.
 
-- `test.py` appears stale and references an endpoint that is not currently routed
+- retired ad hoc scripts and orphaned modules should be moved into `archive/` once confirmed unused
 
-For most changes, real verification means exercising the relevant HTTP endpoints and inspecting the resulting files and CSV rows.
+For most changes, real verification still means exercising the relevant HTTP endpoints and inspecting the resulting files and CSV rows.
 
-Upload filtering now has request-level tests that mock the `run_cli(...)` seam to verify one failed upload does not poison the next request in the same Django process. The coverage includes failure on the initial user-file filter call and failure on the later public-copy filter call. The test suite also checks that helper imports do not eagerly load the heavy audio stack or generation helpers.
+The request-level coverage now includes:
+
+- failed-then-successful upload isolation around the `run_cli(...)` seam
+- `get_coughs` handling for persisted `people` values
+- modular user/library view coverage for CSV reads, CSV updates, file streaming, rename/delete alignment, and shared public uploads
+- startup probes that assert `CoughToMusic.util`, `CoughToMusic.task`, `CoughToMusic.cocreate.workflows`, and `CoughToMusic.views` do not eagerly import the heavy audio/generation stack
 
 Verified test command:
 
@@ -448,11 +335,12 @@ The current library split is:
 - `cocreate/contracts.py` defines the typed request/result objects for the active workflows.
 - `cocreate/storage.py` owns path construction, `cough_table.csv` lookup, and public asset path helpers.
 - `cocreate/workflows.py` is the active orchestration layer for trio and drum generation.
-- `co_create_utils.py` is legacy compatibility code for older call sites and emits a deprecation warning if `save_final_cocreate` is invoked directly.
 - `cocreate/lib/cough2mid.py` turns a cough WAV into short motif MIDI.
 - `cocreate/lib/generation.py` interpolates melody or drum material with Magenta/MusicVAE checkpoints under `CoughToMusic/cocreate/model/`.
 - `cocreate/lib/drum.py` classifies coughs into drum roles and writes drum MIDI from onset/loudness features.
 - `cocreate/lib/midi.py` normalizes MIDI structure and renders MIDI back to WAV using soundfonts.
+
+Retired co-create compatibility code is archived under `archive/` instead of staying in the active `CoughToMusic/` package. See `archive/ARCHIVE.md` for the decision log and archived paths.
 
 Mode-specific temp and final folders in the active flow:
 
@@ -465,93 +353,15 @@ Important caveat:
 
 - `save_music` remains the canonical finalize path for generated output.
 - `save_music_cocreate` is now a compatibility endpoint that delegates to the same active finalize contract used by `save_music`.
-- `co_create_utils.save_final_cocreate` still reflects the older `temp_cocreate` / `generated_music_cocreate` layout, should be treated as legacy compatibility code rather than the active runtime path, and now emits a `DeprecationWarning` when called.
+- older retired finalize helpers should be moved into `archive/` and logged in `archive/ARCHIVE.md` rather than kept importable from the active package once all live callers are gone.
 
-```mermaid
-flowchart TD
-    client["Client"]
-    generate_view["views/generation.py<br/>generate"]
-    gen_service["services/generation.py<br/>enqueue_generation_request"]
-    queue["runtime/generation_queue.py<br/>lazy in-memory queue"]
-    job["task.py<br/>GenerateJob.run"]
-    modes["services/generation_modes.py<br/>trio / trio_manual / drum / drum_manual"]
-    workflows["cocreate/workflows.py<br/>active orchestration"]
-    storage["cocreate/storage.py<br/>paths + CSV lookup"]
+The companion co-create diagram is in `DIAGRAMS.md`.
 
-    subgraph cocreate["CoughToMusic/cocreate/lib"]
-        cough2mid["cough2mid.py<br/>cough WAV -> motif MIDI"]
-        melody["generation.py<br/>MusicVAE interpolation"]
-        drum["drum.py<br/>cough ranking -> drum MIDI"]
-        midi["midi.py<br/>normalize/render MIDI -> WAV"]
-    end
+## Archive Policy
 
-    subgraph inputs["Read-side inputs"]
-        user_wavs["media/{user}/cough_audio/*.wav"]
-        cough_csv["media/{user}/cough_audio/cough_table.csv"]
-        public_cough["media/public_cough/*.wav"]
-        public_motifs["media/public_motif/* and related public motif dirs"]
-        models["CoughToMusic/cocreate/model/*"]
-        soundfonts["CoughToMusic/cocreate/soundfonts/*"]
-    end
+Use `archive/` for retired implementation artifacts that are being kept for reference.
 
-    subgraph temp["Temp outputs"]
-        temp_trio["media/{user}/temp_trio"]
-        temp_manual_trio["media/{user}/temp_manual_trio"]
-        temp_manual_drum["media/{user}/temp_manual_drum"]
-        temp_autofill_drum["media/{user}/temp_autofill_drum"]
-    end
-
-    status["views/generation.py<br/>generate_status_view"]
-    save_view["views/generation.py<br/>save_music"]
-    save_service["services/generation.py<br/>save_music_result"]
-    move["util.py<br/>save_music_move"]
-
-    subgraph final["Finalized outputs"]
-        gen_trio["media/{user}/generated_trio"]
-        gen_manual_trio["media/{user}/generated_manual_trio"]
-        gen_manual_drum["media/{user}/generated_manual_drum"]
-        gen_auto_drum["media/{user}/generated_autofill_drum"]
-        music_csv["media/{user}/generated_music/music_table.csv"]
-    end
-
-    legacy["views/generation.py<br/>save_music_cocreate (compatibility)"]
-    legacy_save["co_create_utils.py<br/>legacy save_final_cocreate"]
-
-    client --> generate_view --> gen_service --> queue --> job --> modes --> workflows
-    gen_service --> user_wavs
-    workflows --> storage
-    workflows --> cough_csv
-    workflows --> user_wavs
-    workflows --> public_cough
-    workflows --> public_motifs
-    workflows --> cough2mid
-    workflows --> melody
-    workflows --> drum
-    cough2mid --> midi
-    melody --> midi
-    drum --> midi
-    melody --> models
-    midi --> soundfonts
-
-    workflows --> temp_trio
-    workflows --> temp_manual_trio
-    workflows --> temp_manual_drum
-    workflows --> temp_autofill_drum
-
-    client --> status
-    status --> queue
-
-    client --> save_view --> save_service --> move
-    move --> temp_trio
-    move --> temp_manual_trio
-    move --> temp_manual_drum
-    move --> temp_autofill_drum
-    move --> gen_trio
-    move --> gen_manual_trio
-    move --> gen_manual_drum
-    move --> gen_auto_drum
-    move --> music_csv
-
-    client -. compatibility endpoint .-> legacy
-    legacy -. legacy helper remains in repo .-> legacy_save
-```
+- move retired files out of active runtime packages when they no longer have live callers
+- log each archival decision in `archive/ARCHIVE.md`
+- include why the code was retired, what replaced it, and whether any tests or docs were updated alongside it
+- if only a function is retired, either remove it outright or move the retired implementation into an archived module and log the decision
