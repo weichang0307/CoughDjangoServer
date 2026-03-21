@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from .contracts import CoCreateResult
 from .storage import get_mode_temp_folder
 
 MEL_CONFIG = {
@@ -37,3 +40,22 @@ def ensure_temp_folder(user_id: str, mode: str) -> str:
     temp_folder = get_mode_temp_folder(user_id, mode)
     temp_folder.mkdir(parents=True, exist_ok=True)
     return str(temp_folder)
+
+
+def create_result(
+    *,
+    generated_music: str | Path,
+    cough_paths: list[str | Path],
+    cough_motifs: list[str | Path] | None = None,
+    used_public_paths: list[str | Path] | None = None,
+    used_motif_paths: list[str | Path] | None = None,
+    extra: dict | None = None,
+) -> CoCreateResult:
+    return CoCreateResult(
+        generated_music=generated_music,
+        cough_paths=cough_paths,
+        cough_motifs=list(cough_motifs or []),
+        used_public_paths=list(used_public_paths or []),
+        used_motif_paths=list(used_motif_paths or []),
+        extra=dict(extra or {}),
+    )

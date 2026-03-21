@@ -44,6 +44,10 @@ def get_mode_temp_folder(user_id: str, mode: str) -> Path:
     return get_user_folder(user_id) / MODE_TO_TEMP_FOLDER[mode]
 
 
+def get_mode_temp_path(user_id: str, mode: str, *parts: str) -> Path:
+    return get_mode_temp_folder(user_id, mode).joinpath(*parts)
+
+
 def get_mode_generated_folder(user_id: str, mode: str) -> Path:
     return get_user_folder(user_id) / MODE_TO_GENERATED_FOLDER[mode]
 

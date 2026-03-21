@@ -129,8 +129,8 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
         payload = result.to_payload()
         self.assertEqual(payload["generated_music"], "generated.wav")
         self.assertEqual(payload["cough_motifs"], ["motif0.wav"])
-        self.assertNotIn("used_public_paths", payload)
-        self.assertEqual(payload["used_motif_paths"], [str(Path(settings.BASE_DIR) / "motif1.wav")])
+        self.assertEqual(payload["used_public_paths"], ["public.wav"])
+        self.assertEqual(payload["used_motif_paths"], ["motif1.wav"])
 
     def test_cocreate_package_exports_contracts_only(self):
         from CoughToMusic import cocreate
@@ -171,6 +171,22 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
             {
                 "generated_music": "generated.wav",
                 "cough_paths": ["cough-a.wav"],
+            },
+        )
+
+    def test_cocreate_result_normalizes_path_objects(self):
+        result = CoCreateResult(
+            generated_music=Path("generated.wav"),
+            cough_paths=[Path("cough-a.wav")],
+            cough_motifs=[Path("motif-a.wav")],
+        )
+
+        self.assertEqual(
+            result.to_payload(),
+            {
+                "generated_music": "generated.wav",
+                "cough_paths": ["cough-a.wav"],
+                "cough_motifs": ["motif-a.wav"],
             },
         )
 

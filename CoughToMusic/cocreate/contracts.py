@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from os import fspath
 from pathlib import Path
 from typing import Any
+
+
+def _coerce_path(value: Any) -> str:
+    return fspath(value)
+
+
+def _coerce_paths(values: list[Any]) -> list[str]:
+    return [_coerce_path(value) for value in values]
 
 
 @dataclass
@@ -15,17 +24,24 @@ class CoCreateRequest:
 
     @property
     def cough_paths(self) -> list[str]:
-        return [str(path) for path in self.coughlist]
+        return _coerce_paths(self.coughlist)
 
 
 @dataclass
 class CoCreateResult:
-    generated_music: str
-    cough_paths: list[str]
-    cough_motifs: list[str] = field(default_factory=list)
-    used_public_paths: list[str] = field(default_factory=list)
-    used_motif_paths: list[str] = field(default_factory=list)
+    generated_music: str | Path
+    cough_paths: list[str | Path]
+    cough_motifs: list[str | Path] = field(default_factory=list)
+    used_public_paths: list[str | Path] = field(default_factory=list)
+    used_motif_paths: list[str | Path] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.generated_music = _coerce_path(self.generated_music)
+        self.cough_paths = _coerce_paths(self.cough_paths)
+        self.cough_motifs = _coerce_paths(self.cough_motifs)
+        self.used_public_paths = _coerce_paths(self.used_public_paths)
+        self.used_motif_paths = _coerce_paths(self.used_motif_paths)
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
