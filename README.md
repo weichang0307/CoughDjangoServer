@@ -285,7 +285,9 @@ There is no built-in backup system for uploaded inputs.
 
 ## Verification Reality
 
-`CoughToMusic/tests.py` now includes request-level coverage for upload filtering isolation, modular user/library endpoint migration behavior, and focused startup probes for helper imports.
+The `CoughToMusic/tests/` package now splits request-level coverage by domain so upload, user view, library view, generation runtime, co-create, and import-safety tests can be run independently.
+
+Shared test utilities now live in `CoughToMusic/tests/support.py`, including temp media setup, common CSV field constants, row/payload builders, and file/CSV assertion helpers. New request-level tests should prefer those helpers over hand-written fixture dicts.
 
 - retired ad hoc scripts and orphaned modules should be moved into `archive/` once confirmed unused
 
@@ -302,6 +304,14 @@ Verified test command:
 
 ```powershell
 C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe manage.py test CoughToMusic.tests
+```
+
+Useful targeted commands:
+
+```powershell
+C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe manage.py test CoughToMusic.tests.test_uploads
+C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe manage.py test CoughToMusic.tests.test_user_views
+C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe manage.py test CoughToMusic.tests.test_library_views
 ```
 
 The upload tests intentionally create temporary media roots under `media/test_media_<uuid>/` instead of using Python's default `tempfile` directory creation. On this Windows setup, `tempfile`-created directories were not writable for child paths under the Django test process, while normal `os.makedirs(...)` paths under the repo were stable.

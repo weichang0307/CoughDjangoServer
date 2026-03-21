@@ -227,10 +227,13 @@ For rename/delete changes:
 
 Be skeptical of existing tests:
 
-- `CoughToMusic/tests.py` now includes request-level coverage for failed-then-successful upload behavior around the filter wrapper
-- `CoughToMusic/tests.py` also covers the migrated modular user/library endpoints, including CSV update behavior, file streaming, rename/delete alignment, and shared public upload writes
-- `CoughToMusic/tests.py` uses repo-local `media/test_media_<uuid>/` scratch directories for upload tests because Python `tempfile` directories were not writable for nested paths under the Windows Django test process in this workspace
-- `CoughToMusic/tests.py` includes an import-safety probe for `CoughToMusic.views` so modular view imports stay lightweight
+- `CoughToMusic/tests/` now splits coverage by domain so upload, user view, library view, generation runtime, co-create, and import-safety tests can be run independently
+- `CoughToMusic/tests/test_uploads.py` covers failed-then-successful upload behavior around the filter wrapper
+- `CoughToMusic/tests/test_library_views.py` covers the migrated modular library endpoints, including CSV update behavior, file streaming, rename/delete alignment, shared public upload writes, and the CSRF regression probe
+- `CoughToMusic/tests/test_user_views.py` covers the migrated modular user endpoints
+- the split test modules still use repo-local `media/test_media_<uuid>/` scratch directories because Python `tempfile` directories were not writable for nested paths under the Windows Django test process in this workspace
+- `CoughToMusic/tests/test_import_safety.py` includes the import-safety probes for `CoughToMusic.util`, `CoughToMusic.task`, `CoughToMusic.cocreate.workflows`, and `CoughToMusic.views`
+- `CoughToMusic/tests/support.py` is the shared source for temp media setup, CSV schema constants, common row/payload builders, and file/CSV assertion helpers; prefer extending it over duplicating test fixture dicts
 - stale ad hoc scripts and orphaned modules are archive candidates once confirmed to have no live callers
 
 ## Archive Policy
@@ -253,6 +256,7 @@ Current repo reality:
 - `runserver.ps1` launches `manage.py runserver` with `C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe`
 - on this machine, bare `python` may resolve to a `pyenv` shim and `conda` may not be on `PATH`
 - for reliable local verification, prefer direct interpreter invocations such as `C:\ProgramData\anaconda3\envs\DjangoEnv2\python.exe manage.py test CoughToMusic.tests`
+- for narrower local runs, target the split modules directly, for example `... manage.py test CoughToMusic.tests.test_uploads CoughToMusic.tests.test_library_views`
 
 Do not "clean this up" as a side effect of another task unless requested.
 
