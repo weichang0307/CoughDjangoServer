@@ -106,7 +106,7 @@ Generation:
 - `generate` normalizes the requested mode and creates a `GenerateJob`.
 - The runtime layer lazily starts a single background thread and consumes jobs from an in-memory queue.
 - Mode-specific generation is delegated from `CoughToMusic/task.py` into `CoughToMusic/services/generation_modes.py`.
-- Co-create modes then flow through `CoughToMusic/cocreate/workflows.py`, with `CoughToMusic/cocreate/storage.py` owning path and CSV lookup concerns.
+- Co-create modes then flow through the stable facade in `CoughToMusic/cocreate/workflows.py`, with mode-specific orchestration in `CoughToMusic/cocreate/trio_workflows.py` and `CoughToMusic/cocreate/drum_workflows.py`, adapter seams in `CoughToMusic/cocreate/trio_adapters.py` and `CoughToMusic/cocreate/drum_adapters.py`, and `CoughToMusic/cocreate/storage.py` owning path and CSV lookup concerns.
 
 Readback:
 
@@ -298,7 +298,8 @@ The request-level coverage now includes:
 - failed-then-successful upload isolation around the `run_cli(...)` seam
 - `get_coughs` handling for persisted `people` values
 - modular user/library view coverage for CSV reads, CSV updates, file streaming, rename/delete alignment, and shared public uploads
-- startup probes that assert `CoughToMusic.util`, `CoughToMusic.task`, `CoughToMusic.cocreate.workflows`, and `CoughToMusic.views` do not eagerly import the heavy audio/generation stack
+- cocreate surface coverage for the package exports, `CoCreateResult` payload shape, and lazy import behavior around `CoughToMusic.cocreate`
+- startup probes that assert `CoughToMusic.util`, `CoughToMusic.task`, `CoughToMusic.cocreate`, `CoughToMusic.cocreate.workflows`, the split cocreate workflow/adapter modules, and `CoughToMusic.views` do not eagerly import the heavy audio/generation stack
 
 Verified test command:
 
@@ -334,17 +335,22 @@ The active co-create request flow is:
 2. `CoughToMusic/services/generation.py` converts the caret-delimited `cough_path` string into real WAV paths under `media/<user>/cough_audio/`.
 3. The same service normalizes request mode into one of the runtime job modes: `trio`, `trio_manual`, `drum`, or `drum_manual`.
 4. The in-memory runtime queue starts lazily, stores the `GenerateJob`, and runs it on the single worker thread.
-5. `CoughToMusic/services/generation_modes.py` dispatches to `CoughToMusic/cocreate/workflows.py`.
-6. `workflows.py` uses `CoughToMusic/cocreate/storage.py` for path and CSV lookup, then calls the lower-level `CoughToMusic/cocreate/lib/` modules.
-7. The `cocreate/lib/` code reads cough WAVs, shared public cough assets, model checkpoints, and soundfonts, then writes MIDI and rendered WAV artifacts into mode-specific temp folders.
-8. The client polls `generate_status_view` and receives the generated temp artifact paths from the in-memory job result.
-9. The active finalize path is `save_music`, which moves co-create temp outputs into permanent `generated_*` folders and appends metadata to the standard music table.
+5. `CoughToMusic/services/generation_modes.py` dispatches to the stable facade in `CoughToMusic/cocreate/workflows.py`.
+6. That facade forwards trio modes into `CoughToMusic/cocreate/trio_workflows.py` and drum modes into `CoughToMusic/cocreate/drum_workflows.py`, while `CoughToMusic/cocreate/storage.py` owns path and CSV lookup concerns.
+7. The workflow modules call internal adapter modules, which isolate the low-level `cocreate/lib/` generation and rendering steps behind lazy-import helper functions.
+8. The `cocreate/lib/` code reads cough WAVs, shared public cough assets, model checkpoints, and soundfonts, then writes MIDI and rendered WAV artifacts into mode-specific temp folders.
+9. The client polls `generate_status_view` and receives the generated temp artifact paths from the in-memory job result.
+10. The active finalize path is `save_music`, which moves co-create temp outputs into permanent `generated_*` folders and appends metadata to the standard music table.
 
 The current library split is:
 
 - `cocreate/contracts.py` defines the typed request/result objects for the active workflows.
 - `cocreate/storage.py` owns path construction, `cough_table.csv` lookup, and public asset path helpers.
-- `cocreate/workflows.py` is the active orchestration layer for trio and drum generation.
+- `cocreate/workflows.py` is the stable import surface for active co-create entry points.
+- `cocreate/trio_workflows.py` owns trio and trio-manual orchestration.
+- `cocreate/drum_workflows.py` owns drum-manual and drum-autofill orchestration.
+- `cocreate/trio_adapters.py` and `cocreate/drum_adapters.py` isolate the low-level generation/rendering calls from the app-facing workflow modules while keeping heavy imports lazy.
+- `cocreate/workflow_common.py` holds shared temp-folder and trio-track constants used by the split workflow modules.
 - `cocreate/lib/cough2mid.py` turns a cough WAV into short motif MIDI.
 - `cocreate/lib/generation.py` interpolates melody or drum material with Magenta/MusicVAE checkpoints under `CoughToMusic/cocreate/model/`.
 - `cocreate/lib/drum.py` classifies coughs into drum roles and writes drum MIDI from onset/loudness features.

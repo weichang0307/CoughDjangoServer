@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase
 
 from CoughToMusic.cocreate import storage as cocreate_storage
@@ -84,6 +85,94 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
                 self.assertEqual(captured["request"].mode, mode)
                 self.assertEqual(captured["request"].user_id, job.user_id)
                 self.assertIsInstance(captured["request"].coughlist[0], Path)
+
+    def test_trio_workflows_delegate_to_trio_adapters(self):
+        from CoughToMusic.cocreate import trio_workflows
+        from CoughToMusic.cocreate.contracts import CoCreateRequest
+
+        request = CoCreateRequest(
+            mode="trio",
+            user_id="refactor-user",
+            job_uuid="trio-uuid",
+            coughlist=[Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "listed.wav"],
+        )
+
+        with patch("CoughToMusic.cocreate.trio_workflows.ensure_temp_folder", return_value="temp_trio"), patch(
+            "CoughToMusic.cocreate.trio_workflows.resolve_pub_cough_id", return_value=42
+        ), patch("CoughToMusic.cocreate.trio_workflows.generate_public_trio_motif", return_value="motif.wav"), patch(
+            "CoughToMusic.cocreate.trio_workflows.generate_trio_midi_sequence",
+            return_value=(["public.wav"], ["used_motif.wav"]),
+        ), patch("CoughToMusic.cocreate.trio_workflows.render_public_trio_tracks", return_value="generated.wav"):
+            result = trio_workflows.run_trio(request)
+
+        self.assertEqual(result.to_payload()["generated_music"], "generated.wav")
+        self.assertEqual(result.to_payload()["cough_motifs"], ["motif.wav"])
+        self.assertEqual(result.to_payload()["used_public_paths"], ["public.wav"])
+
+    def test_drum_workflows_delegate_to_drum_adapters(self):
+        from CoughToMusic.cocreate import drum_workflows
+        from CoughToMusic.cocreate.contracts import CoCreateRequest
+
+        request = CoCreateRequest(
+            mode="drum",
+            user_id="refactor-user",
+            job_uuid="drum-uuid",
+            coughlist=[Path(self._temp_media_path) / "refactor-user" / "cough_audio" / "listed.wav"],
+        )
+
+        with patch("CoughToMusic.cocreate.drum_workflows.ensure_temp_folder", return_value="temp_drum"), patch(
+            "CoughToMusic.cocreate.drum_workflows.generate_autofill_drum",
+            return_value=("generated.wav", ["public.wav"], ["motif0.wav", "motif1.wav"]),
+        ):
+            result = drum_workflows.run_drum_autofill(request)
+
+        payload = result.to_payload()
+        self.assertEqual(payload["generated_music"], "generated.wav")
+        self.assertEqual(payload["cough_motifs"], ["motif0.wav"])
+        self.assertNotIn("used_public_paths", payload)
+        self.assertEqual(payload["used_motif_paths"], [str(Path(settings.BASE_DIR) / "motif1.wav")])
+
+    def test_cocreate_package_exports_contracts_only(self):
+        from CoughToMusic import cocreate
+
+        self.assertEqual(cocreate.__all__, ["CoCreateRequest", "CoCreateResult"])
+        self.assertTrue(hasattr(cocreate, "CoCreateRequest"))
+        self.assertTrue(hasattr(cocreate, "CoCreateResult"))
+        self.assertFalse(hasattr(cocreate, "run_trio"))
+        self.assertFalse(hasattr(cocreate, "run_drum_manual"))
+
+    def test_cocreate_result_payload_preserves_contract(self):
+        result = CoCreateResult(
+            generated_music="generated.wav",
+            cough_paths=["cough-a.wav", "cough-b.wav"],
+            cough_motifs=["motif-a.wav"],
+            used_public_paths=["public-a.wav"],
+            used_motif_paths=["used-motif-a.wav"],
+            extra={"mode": "trio"},
+        )
+
+        self.assertEqual(
+            result.to_payload(),
+            {
+                "generated_music": "generated.wav",
+                "cough_paths": ["cough-a.wav", "cough-b.wav"],
+                "cough_motifs": ["motif-a.wav"],
+                "used_public_paths": ["public-a.wav"],
+                "used_motif_paths": ["used-motif-a.wav"],
+                "mode": "trio",
+            },
+        )
+
+    def test_cocreate_result_payload_omits_empty_optional_fields(self):
+        result = CoCreateResult(generated_music="generated.wav", cough_paths=["cough-a.wav"])
+
+        self.assertEqual(
+            result.to_payload(),
+            {
+                "generated_music": "generated.wav",
+                "cough_paths": ["cough-a.wav"],
+            },
+        )
 
     def test_resolve_pub_cough_id_reads_cough_table(self):
         user_id = "refactor-user"

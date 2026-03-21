@@ -47,6 +47,36 @@ class RuntimeStartupTests(TestCase):
             ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
         )
 
+    def test_cocreate_package_import_keeps_heavy_modules_lazy(self):
+        self._assert_module_import_is_lazy(
+            "CoughToMusic.cocreate",
+            ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
+        )
+
+    def test_cocreate_trio_workflows_import_keeps_heavy_modules_lazy(self):
+        self._assert_module_import_is_lazy(
+            "CoughToMusic.cocreate.trio_workflows",
+            ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
+        )
+
+    def test_cocreate_drum_workflows_import_keeps_heavy_modules_lazy(self):
+        self._assert_module_import_is_lazy(
+            "CoughToMusic.cocreate.drum_workflows",
+            ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
+        )
+
+    def test_cocreate_trio_adapters_import_keeps_heavy_modules_lazy(self):
+        self._assert_module_import_is_lazy(
+            "CoughToMusic.cocreate.trio_adapters",
+            ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
+        )
+
+    def test_cocreate_drum_adapters_import_keeps_heavy_modules_lazy(self):
+        self._assert_module_import_is_lazy(
+            "CoughToMusic.cocreate.drum_adapters",
+            ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
+        )
+
     def test_views_import_keeps_heavy_modules_lazy(self):
         self._assert_module_import_is_lazy(
             "CoughToMusic.views",

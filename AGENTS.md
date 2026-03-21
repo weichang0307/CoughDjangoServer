@@ -48,6 +48,10 @@ Core helpers:
 - `CoughToMusic/cocreate/contracts.py`
 - `CoughToMusic/cocreate/storage.py`
 - `CoughToMusic/cocreate/workflows.py`
+- `CoughToMusic/cocreate/trio_workflows.py`
+- `CoughToMusic/cocreate/drum_workflows.py`
+- `CoughToMusic/cocreate/trio_adapters.py`
+- `CoughToMusic/cocreate/drum_adapters.py`
 
 Runtime settings:
 
@@ -86,7 +90,7 @@ Generation:
 - `generate` converts request data into a `GenerateJob`
 - jobs are queued in-process
 - the runtime layer starts a daemon thread lazily on first generation use
-- `GenerateJob.run()` delegates mode-specific generation to `CoughToMusic/services/generation_modes.py`, which dispatches co-create modes to `CoughToMusic/cocreate/workflows.py`
+- `GenerateJob.run()` delegates mode-specific generation to `CoughToMusic/services/generation_modes.py`, which dispatches co-create modes through the stable facade in `CoughToMusic/cocreate/workflows.py`
 
 Finalize:
 
@@ -177,7 +181,7 @@ Usually safe when scoped and verified:
 - orchestration helpers in `CoughToMusic/services/`
 - runtime lifecycle helpers in `CoughToMusic/runtime/`
 - path and save/move rules in `CoughToMusic/util.py`
-- cocreate application-layer helpers in `CoughToMusic/cocreate/storage.py` and `CoughToMusic/cocreate/workflows.py`
+- cocreate application-layer helpers in `CoughToMusic/cocreate/storage.py`, `CoughToMusic/cocreate/workflows.py`, `CoughToMusic/cocreate/trio_workflows.py`, `CoughToMusic/cocreate/drum_workflows.py`, `CoughToMusic/cocreate/trio_adapters.py`, and `CoughToMusic/cocreate/drum_adapters.py`
 - mode-specific generation in `CoughToMusic/services/generation_modes.py`
 - archival documentation and retired-code moves under `archive/`
 
@@ -231,8 +235,10 @@ Be skeptical of existing tests:
 - `CoughToMusic/tests/test_uploads.py` covers failed-then-successful upload behavior around the filter wrapper
 - `CoughToMusic/tests/test_library_views.py` covers the migrated modular library endpoints, including CSV update behavior, file streaming, rename/delete alignment, shared public upload writes, and the CSRF regression probe
 - `CoughToMusic/tests/test_user_views.py` covers the migrated modular user endpoints
+- `CoughToMusic/tests/test_cocreate_refactor.py` covers the stable cocreate public surface, including package exports, `CoCreateResult` payload shape, generation mode dispatch, workflow-to-adapter delegation, and path resolution
 - the split test modules still use repo-local `media/test_media_<uuid>/` scratch directories because Python `tempfile` directories were not writable for nested paths under the Windows Django test process in this workspace
-- `CoughToMusic/tests/test_import_safety.py` includes the import-safety probes for `CoughToMusic.util`, `CoughToMusic.task`, `CoughToMusic.cocreate.workflows`, and `CoughToMusic.views`
+- `CoughToMusic/tests/test_import_safety.py` includes the import-safety probes for `CoughToMusic.util`, `CoughToMusic.task`, `CoughToMusic.cocreate`, the split cocreate workflow/adapter modules, `CoughToMusic.cocreate.workflows`, and `CoughToMusic.views`
+- when adding new cocreate helper modules, extend `test_import_safety.py` if those modules are intended to stay import-light
 - `CoughToMusic/tests/support.py` is the shared source for temp media setup, CSV schema constants, common row/payload builders, and file/CSV assertion helpers; prefer extending it over duplicating test fixture dicts
 - stale ad hoc scripts and orphaned modules are archive candidates once confirmed to have no live callers
 
