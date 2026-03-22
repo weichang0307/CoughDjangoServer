@@ -65,13 +65,14 @@ The main flow is:
 1. A client calls `sign_up` to initialize the user folder and CSV files.
 2. A client uploads cough audio through `create_cough_audio`.
 3. The server writes the uploaded audio to `media/<user>/cough_audio/<name>.wav`.
-4. The server filters the cough audio through the YAMNet subprocess worker.
-5. The server runs cough classification and clustering through the same worker boundary.
-6. The server appends metadata to `cough_table.csv`.
-7. If music generation is requested, the controller hands the request to the in-memory runtime queue.
-8. The runtime layer lazily starts the background worker and the worker writes temporary generated outputs under the user folder.
-9. The client polls `generate_status_view`, which reads runtime job state.
-10. The client finalizes output through `save_music` or `save_music_cocreate`.
+4. Django runs a local blank-cough viability check that mirrors the co-create onset and pitch-to-note requirements.
+5. Non-blank uploads are then filtered through the YAMNet subprocess worker.
+6. Django runs cough classification and clustering through the same worker boundary.
+7. Django appends metadata to `cough_table.csv`.
+8. If music generation is requested, the controller hands the request to the in-memory runtime queue.
+9. The runtime layer lazily starts the background worker and the worker writes temporary generated outputs under the user folder.
+10. The client polls `generate_status_view`, which reads runtime job state.
+11. The client finalizes output through `save_music` or `save_music_cocreate`.
 
 Mental model:
 
@@ -97,6 +98,8 @@ User setup:
 Upload and analysis:
 
 - `create_cough_audio` saves the audio file early.
+- It runs `util.is_blank(...)` before any worker, classification, clustering, or public-copy work.
+- Blank uploads are deleted immediately and do not append to the active cough CSV.
 - It then filters the saved file through the subprocess worker boundary.
 - It calls helper code that classifies cough ownership and computes clustering.
 - It may also publish audio into shared public folders.
@@ -134,13 +137,15 @@ The upload-to-worker flow is:
 
 1. `create_cough_audio` calls `process_cough_upload`.
 2. `process_cough_upload` writes the uploaded bytes to `media/<user>/cough_audio/<name>.wav`.
-3. Django calls `filter_coughs(...)`, which sends a JSON payload with the saved file path to the worker using `mode: "filter"`.
-4. The worker reads the WAV from disk, runs noise reduction plus YAMNet-based cough detection, and writes the filtered result back to the same WAV path by default.
-5. Django then calls `classify_cough_event(...)` with `mode: "classify"`.
-6. The worker loads the saved WAV, extracts YAMNet-derived features around detected cough onsets, and returns whether the audio appears to contain user cough, non-user cough, or both.
-7. Django then calls `clustering(...)` with `mode: "cluster"`.
-8. The worker compares YAMNet-derived features from the target cough against template coughs and prior user coughs, then returns a `cluster_id`.
-9. Django appends the final metadata row to `cough_table.csv` and may also write copies into `media/public_cough/`.
+3. Django calls `is_blank(...)`, which dry-runs the co-create onset and CREPE note-segmentation logic against the saved WAV.
+4. If the upload is blank for MIDI generation, Django deletes the WAV and returns without touching the worker, `cough_table.csv`, or `media/public_cough/`.
+5. Otherwise Django calls `filter_coughs(...)`, which sends a JSON payload with the saved file path to the worker using `mode: "filter"`.
+6. The worker reads the WAV from disk, runs noise reduction plus YAMNet-based cough detection, and writes the filtered result back to the same WAV path by default.
+7. Django then calls `classify_cough_event(...)` with `mode: "classify"`.
+8. The worker loads the saved WAV, extracts YAMNet-derived features around detected cough onsets, and returns whether the audio appears to contain user cough, non-user cough, or both.
+9. Django then calls `clustering(...)` with `mode: "cluster"`.
+10. The worker compares YAMNet-derived features from the target cough against template coughs and prior user coughs, then returns a `cluster_id`.
+11. Django appends the final metadata row to `cough_table.csv` and may also write copies into `media/public_cough/`.
 
 What goes into the worker:
 
@@ -161,6 +166,8 @@ Where the outputs flow next:
 - `cough_table.csv` is updated with filename, timestamp, coordinates, public cough ID, cluster ID, and `people`
 - if classification indicates mixed user/non-user content, Django writes split `_1.wav` and `_2.wav` files back into the same user cough folder
 - public copies may be written to `media/public_cough/`
+- blank existing coughs can be moved out of active storage into `media/<user>/cough_audio/archive/`, with their preserved rows written to `media/<user>/cough_audio/archive/cough_table.csv`
+- archived public cough counterparts move to `media/archive/public_cough/`
 - if the request mode is `realtime`, the saved cough file path is then handed to the in-memory generation queue for music generation
 
 Important operational detail:
@@ -179,6 +186,9 @@ Durable state:
 - user CSV files such as `<user>.csv`, `cough_table.csv`, and `music_table.csv`
 - saved WAV and MIDI artifacts
 - shared public assets under `media/public_*`
+- archived blank coughs under `media/<user>/cough_audio/archive/` and `media/archive/public_cough/`
+- archived cough rows are preserved in `media/<user>/cough_audio/archive/cough_table.csv`
+- public cough IDs are allocated monotonically across both active and archived public cough files so archived IDs are not reused
 
 Not durable:
 
@@ -197,10 +207,12 @@ Shared directories created from settings:
 - `media/public_music/`
 - `media/public_motif/`
 - `media/import_cough/`
+- `media/archive/public_cough/`
 
 Common per-user directories:
 
 - `media/<user>/cough_audio/`
+- `media/<user>/cough_audio/archive/`
 - `media/<user>/cough_template/`
 - `media/<user>/generated_music/`
 - `media/<user>/generated_midi/`
@@ -301,7 +313,9 @@ For most changes, real verification still means exercising the relevant HTTP end
 The request-level coverage now includes:
 
 - failed-then-successful upload isolation around the `run_cli(...)` seam
+- blank-upload short-circuit coverage before worker/classification/public-copy work
 - `get_coughs` handling for persisted `people` values
+- blank-existing-cough archival coverage for active file moves and archive CSV preservation
 - modular user/library view coverage for CSV reads, CSV updates, file streaming, rename/delete alignment, and shared public uploads
 - cocreate surface coverage for the package exports, `CoCreateResult` payload shape, and lazy import behavior around `CoughToMusic.cocreate`
 - startup probes that assert `CoughToMusic.util`, `CoughToMusic.task`, `CoughToMusic.cocreate`, `CoughToMusic.cocreate.workflows`, the split cocreate workflow/adapter modules, and `CoughToMusic.views` do not eagerly import the heavy audio/generation stack

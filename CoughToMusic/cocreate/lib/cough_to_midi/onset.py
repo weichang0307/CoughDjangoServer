@@ -3,6 +3,8 @@ import librosa
 
 def normalization(data):
     _range = np.max(data) - np.min(data)
+    if _range <= 0:
+        return np.zeros_like(data)
     return (data - np.min(data)) / _range
 
 def detect(audio_data, sr, initial_threshold=0.2, min_threshold=0.05, step=0.05):

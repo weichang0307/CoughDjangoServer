@@ -1,5 +1,6 @@
 import datetime
 import os
+import shutil
 import wave
 from wsgiref.util import FileWrapper
 
@@ -8,7 +9,7 @@ from django.conf import settings
 from django.http import Http404, HttpResponse, StreamingHttpResponse
 
 from ..table import update_cough_table, update_music_table
-from ..util import save_pcm16_to_wav
+from ..util import is_blank, save_pcm16_to_wav
 
 MUSIC_FOLDERS = [
     ("generated_music", "normal"),
@@ -71,6 +72,107 @@ def get_cough_info_payload(metadata_dict):
     if not os.path.exists(cough_table_path):
         raise ValueError(f"Cough table {cough_table_path} does not exist.")
     return pd.read_csv(cough_table_path).to_dict(orient="records")
+
+
+def archive_blank_cough_payload(metadata_dict):
+    user_id = metadata_dict.get("userId")
+    filename = metadata_dict.get("filename") or metadata_dict.get("fileName")
+    if not user_id or not filename:
+        raise ValueError("Missing userId or filename")
+
+    filename = _build_wav_name(filename)
+    cough_folder = os.path.join(settings.MEDIA_ROOT, user_id, "cough_audio")
+    cough_path = os.path.join(cough_folder, filename)
+    _debug_blank_archive(f"{user_id}/{filename}: starting archive_blank_cough_payload")
+    if not os.path.exists(cough_path):
+        raise ValueError(f"Cough file {cough_path} does not exist.")
+
+    _debug_blank_archive(f"{user_id}/{filename}: checking blank status")
+    if not _is_blank_cough_audio(cough_path):
+        _debug_blank_archive(f"{user_id}/{filename}: kept because is_blank returned False")
+        return {
+            "archived": False,
+            "isBlank": False,
+            "message": "Cough audio is not blank.",
+        }
+
+    cough_table_path = os.path.join(cough_folder, "cough_table.csv")
+    if not os.path.exists(cough_table_path):
+        raise ValueError(f"Cough table {cough_table_path} does not exist.")
+
+    cough_df = pd.read_csv(cough_table_path)
+    if "filename" not in cough_df.columns:
+        raise ValueError("Cough table is missing filename column.")
+
+    matching_rows = cough_df[cough_df["filename"].astype(str) == filename]
+    if matching_rows.empty:
+        raise ValueError(f"No cough row found for {filename}.")
+
+    archived_rows = matching_rows.to_dict(orient="records")
+    pub_cough_id = _resolve_pub_cough_id_from_rows(archived_rows)
+    public_cough_path = None
+    public_archive_path = None
+    if pub_cough_id not in (None, "", "-1"):
+        public_cough_path = os.path.join(settings.PUBLIC_COUGH, f"{pub_cough_id}.wav")
+        _debug_blank_archive(f"{user_id}/{filename}: resolved public cough id {pub_cough_id}")
+        if not os.path.exists(public_cough_path):
+            raise ValueError(f"Public cough file {public_cough_path} does not exist.")
+        public_archive_path = os.path.join(settings.MEDIA_ROOT, "archive", "public_cough", f"{pub_cough_id}.wav")
+
+    archive_folder = os.path.join(cough_folder, "archive")
+    os.makedirs(archive_folder, exist_ok=True)
+    archive_csv_path = os.path.join(archive_folder, "cough_table.csv")
+
+    if public_cough_path and public_archive_path:
+        _debug_blank_archive(f"{user_id}/{filename}: moving public cough to archive")
+        _move_file(public_cough_path, public_archive_path)
+    _debug_blank_archive(f"{user_id}/{filename}: moving user cough to archive")
+    _move_file(cough_path, os.path.join(archive_folder, filename))
+    _debug_blank_archive(f"{user_id}/{filename}: appending archive CSV row")
+    _write_archive_rows(archive_csv_path, archived_rows)
+
+    cough_df = cough_df[cough_df["filename"].astype(str) != filename]
+    cough_df.to_csv(cough_table_path, index=False)
+    _debug_blank_archive(f"{user_id}/{filename}: removed active CSV row")
+
+    return {
+        "archived": True,
+        "isBlank": True,
+        "filename": filename,
+        "pubCoughID": pub_cough_id,
+        "message": "Blank cough archived successfully.",
+    }
+
+
+def archive_blank_coughs_for_user(user_id):
+    if not user_id:
+        raise ValueError("Missing userId")
+
+    cough_folder = os.path.join(settings.MEDIA_ROOT, user_id, "cough_audio")
+    if not os.path.isdir(cough_folder):
+        return {"archivedCount": 0, "results": []}
+
+    cough_table_path = os.path.join(cough_folder, "cough_table.csv")
+    if not os.path.exists(cough_table_path):
+        return {"archivedCount": 0, "results": []}
+
+    cough_df = pd.read_csv(cough_table_path)
+    if "filename" not in cough_df.columns:
+        return {"archivedCount": 0, "results": []}
+
+    results = []
+    filenames = sorted(
+        {
+            str(filename)
+            for filename in cough_df["filename"].dropna().astype(str).tolist()
+            if filename.endswith(".wav")
+        }
+    )
+    for filename in filenames:
+        result = archive_blank_cough_payload({"userId": user_id, "filename": filename})
+        if result.get("archived"):
+            results.append(result)
+    return {"archivedCount": len(results), "results": results}
 
 
 def set_cough_info_payload(metadata_dict):
@@ -294,7 +396,51 @@ def _remove_empty_parent_dirs(path):
 
 
 def _build_wav_name(stem):
+    if isinstance(stem, str) and stem.endswith(".wav"):
+        return stem
     filename = os.path.join("", f"{stem}.wav")
     if not isinstance(filename, str):
         raise ValueError("Invalid filename format")
     return filename
+
+
+def _is_blank_cough_audio(cough_path):
+    return is_blank(cough_path)
+
+
+def _resolve_pub_cough_id_from_rows(rows):
+    for row in rows:
+        pub_cough_id = str(row.get("pubCoughID", "")).strip()
+        if pub_cough_id and pub_cough_id != "-1" and pub_cough_id.lower() != "nan":
+            return pub_cough_id
+    if rows:
+        pub_cough_id = str(rows[0].get("pubCoughID", "")).strip()
+        return "-1" if pub_cough_id.lower() == "nan" else pub_cough_id
+    return "-1"
+
+
+def _write_archive_rows(table_path, rows):
+    archive_df = pd.DataFrame(rows)
+    if os.path.exists(table_path):
+        existing_df = pd.read_csv(table_path)
+        for column in archive_df.columns:
+            if column not in existing_df.columns:
+                existing_df[column] = ""
+        for column in existing_df.columns:
+            if column not in archive_df.columns:
+                archive_df[column] = ""
+        archive_df = pd.concat([existing_df, archive_df[existing_df.columns]], ignore_index=True)
+    os.makedirs(os.path.dirname(table_path), exist_ok=True)
+    archive_df.to_csv(table_path, index=False)
+
+
+def _move_file(source_path, target_path):
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    if os.path.exists(target_path):
+        os.remove(target_path)
+    shutil.move(source_path, target_path)
+
+
+def _debug_blank_archive(message):
+    if os.environ.get("COUGHTOMUSIC_BLANK_DEBUG") == "1":
+        print(f"[archive_blank_cough] {message}", flush=True)

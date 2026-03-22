@@ -12,6 +12,7 @@ from ..util import (
     clustering,
     filter_coughs,
     filter_coughs_template,
+    is_blank,
     save_pcm16_to_wav,
 )
 
@@ -41,6 +42,11 @@ def process_cough_upload(metadata, audio_data, sample_rate=16000):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
     save_pcm16_to_wav(file_path, audio_data, sample_rate)
+    if is_blank(file_path):
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return {"IsSaving": "false", "isBlank": True, "message": "Blank cough skipped."}
+
     filter_coughs(file_path)
 
     user_table_path = os.path.join(settings.MEDIA_ROOT, user_id, f"{user_id}.csv")
@@ -97,8 +103,7 @@ def process_cough_upload(metadata, audio_data, sample_rate=16000):
 
 def _save_public_cough_copy(audio_data, sample_rate):
     folder_path_public = os.path.join(settings.MEDIA_ROOT, "public_cough")
-    existing_files = os.listdir(folder_path_public)
-    pub_cough_id = str(len(existing_files) + 1)
+    pub_cough_id = _next_public_cough_id()
     file_path_public = os.path.join(folder_path_public, f"{pub_cough_id}.wav")
     save_pcm16_to_wav(file_path_public, audio_data, sample_rate)
     filter_coughs(file_path_public)
@@ -121,7 +126,7 @@ def _save_split_classification_outputs(
     sf.write(non_user_filename, classification_result["non_user_output"], classification_result["sample_rate"])
 
     folder_path_public = os.path.join(settings.MEDIA_ROOT, "public_cough")
-    first_public_id = str(len(os.listdir(folder_path_public)) + 1)
+    first_public_id = _next_public_cough_id()
     update_cough_table(
         user_id,
         {
@@ -141,7 +146,7 @@ def _save_split_classification_outputs(
         classification_result["sample_rate"],
     )
 
-    second_public_id = str(len(os.listdir(folder_path_public)) + 1)
+    second_public_id = _next_public_cough_id()
     update_cough_table(
         user_id,
         {
@@ -160,6 +165,25 @@ def _save_split_classification_outputs(
         classification_result["non_user_output"],
         classification_result["sample_rate"],
     )
+
+
+def _next_public_cough_id():
+    candidate_ids = []
+    search_roots = [
+        os.path.join(settings.MEDIA_ROOT, "public_cough"),
+        os.path.join(settings.MEDIA_ROOT, "archive", "public_cough"),
+    ]
+    for root in search_roots:
+        if not os.path.isdir(root):
+            continue
+        for current_root, _, files in os.walk(root):
+            for file_name in files:
+                stem, ext = os.path.splitext(file_name)
+                if ext.lower() != ".wav":
+                    continue
+                if stem.isdigit():
+                    candidate_ids.append(int(stem))
+    return str(max(candidate_ids, default=0) + 1)
 
 
 def _build_wav_name(stem):

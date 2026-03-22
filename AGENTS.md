@@ -81,6 +81,8 @@ User initialization:
 Upload and analysis:
 
 - `create_cough_audio` writes the uploaded WAV early
+- `util.is_blank(...)` runs before worker filtering and treats uploads as blank when they cannot produce usable onset-plus-pitch MIDI material
+- blank uploads are deleted immediately and skip the later upload-analysis flow
 - then filters the file through the subprocess worker boundary
 - then classifies and clusters it
 - then appends rows to `cough_table.csv`
@@ -101,12 +103,15 @@ Readback:
 
 - `get_coughs`, `get_music`, and `get_uploads_file` expose saved artifacts
 - user/library routed endpoints now live directly in `CoughToMusic/views/users.py` and `CoughToMusic/views/library.py`, with shared CSV/file helpers in `CoughToMusic/services/users.py` and `CoughToMusic/services/library.py`
+- blank existing cough archival is handled in `CoughToMusic/services/library.py`, which moves user/public WAVs out of active folders and preserves archived rows in a separate archive CSV
 
 ## Key Paths
 
 Per-user:
 
 - `media/<user>/cough_audio/`
+- `media/<user>/cough_audio/archive/`
+- `media/<user>/cough_audio/archive/cough_table.csv`
 - `media/<user>/cough_template/`
 - `media/<user>/generated_music/`
 - `media/<user>/generated_midi/`
@@ -121,6 +126,9 @@ Shared:
 - `media/public_music/`
 - `media/public_motif/`
 - `media/import_cough/`
+- `media/archive/public_cough/`
+
+Active cough rows stay in `media/<user>/cough_audio/cough_table.csv`; archived blank cough rows are preserved in `media/<user>/cough_audio/archive/cough_table.csv`.
 
 Temporary:
 
@@ -164,6 +172,7 @@ Do not casually collapse this worker into Django. If you change the payload cont
 ## Common Failure Modes
 
 - WAV file written, later step fails, CSV not updated
+- blank existing cough moved, but archive CSV/public counterpart not updated consistently
 - CSV updated, related file missing or renamed incorrectly
 - temp generation output exists, finalize step never ran
 - public asset folder assumptions break on a new machine
@@ -212,6 +221,7 @@ Prefer flow-level checks over isolated unit assumptions.
 For upload changes:
 
 - confirm the WAV lands in the expected user folder
+- confirm blank uploads are deleted before worker/filter/classify/cluster/public-copy work begins
 - confirm `cough_table.csv` reflects the intended row state
 - confirm a failed filter request does not poison the next upload in the same Django process
 - prefer request-level tests that fail once and then succeed on a second upload, ideally at the `run_cli(...)` seam if full worker execution is impractical in tests
@@ -228,6 +238,14 @@ For generation changes:
 For rename/delete changes:
 
 - confirm file paths and CSV entries stay aligned
+
+For blank-cough archival changes:
+
+- confirm the user WAV leaves `media/<user>/cough_audio/`
+- confirm the matching public WAV leaves `media/public_cough/` when `pubCoughID` is live
+- confirm the active `cough_table.csv` row is removed
+- confirm the archived row is preserved in `media/<user>/cough_audio/archive/cough_table.csv`
+- confirm future public cough IDs do not reuse archived IDs
 
 Be skeptical of existing tests:
 

@@ -1,10 +1,14 @@
 import datetime
 import json
 import os
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
+
+from CoughToMusic.services.library import archive_blank_cough_payload
 
 from .support import COUGH_TABLE_FIELDS, MUSIC_STATS_FIELDS, MUSIC_TABLE_FIELDS, TempMediaMixin
 
@@ -53,6 +57,21 @@ class LibraryViewsTests(TempMediaMixin, TestCase):
 
     def _music_table_path(self):
         return os.path.join(self._temp_media_path, self.user_id, "generated_music", "music_table.csv")
+
+    def _cough_archive_folder(self):
+        return os.path.join(self._temp_media_path, self.user_id, "cough_audio", "archive")
+
+    def _cough_archive_table_path(self):
+        return os.path.join(self._cough_archive_folder(), "cough_table.csv")
+
+    def _archived_cough_path(self, filename):
+        return os.path.join(self._cough_archive_folder(), filename)
+
+    def _archived_public_cough_path(self, pub_cough_id):
+        return os.path.join(self._temp_media_path, "archive", "public_cough", f"{pub_cough_id}.wav")
+
+    def _public_cough_path(self, pub_cough_id):
+        return os.path.join(self._temp_media_path, "public_cough", f"{pub_cough_id}.wav")
 
     def test_get_music_returns_records_from_all_generated_folders(self):
         cases = [
@@ -237,3 +256,59 @@ class LibraryViewsTests(TempMediaMixin, TestCase):
         )
         self.assertEqual(music_response.status_code, 200, music_response.content.decode())
         self.assert_file_exists(os.path.join(self.public_music_folder, "public-song.wav"))
+
+    def test_archive_blank_cough_moves_active_files_and_preserves_row_in_archive_csv(self):
+        active_cough_path = os.path.join(self._temp_media_path, self.user_id, "cough_audio", "listed.wav")
+        public_cough_path = self._public_cough_path("2")
+        self.write_wav(active_cough_path)
+        self.write_wav(public_cough_path)
+        self.write_csv(
+            self._cough_table_path(),
+            COUGH_TABLE_FIELDS,
+            [self.make_cough_row(filename="listed.wav", pub_cough_id="2")],
+        )
+
+        with patch.object(settings, "PUBLIC_COUGH", os.path.join(self._temp_media_path, "public_cough")), patch(
+            "CoughToMusic.services.library._is_blank_cough_audio",
+            return_value=True,
+        ):
+            response = archive_blank_cough_payload({"userId": self.user_id, "filename": "listed.wav"})
+
+        self.assertTrue(response["archived"])
+        self.assertTrue(response["isBlank"])
+        self.assertFalse(os.path.exists(active_cough_path))
+        self.assertFalse(os.path.exists(public_cough_path))
+        self.assert_file_exists(self._archived_cough_path("listed.wav"))
+        self.assert_file_exists(self._archived_public_cough_path("2"))
+        self.assert_csv_has_rows(self._cough_table_path(), [])
+        self.assert_csv_has_rows(
+            self._cough_archive_table_path(),
+            [self.make_cough_row(filename="listed.wav", pub_cough_id="2")],
+        )
+
+    def test_archive_blank_cough_noops_when_audio_is_not_blank(self):
+        active_cough_path = os.path.join(self._temp_media_path, self.user_id, "cough_audio", "listed.wav")
+        public_cough_path = self._public_cough_path("2")
+        self.write_wav(active_cough_path)
+        self.write_wav(public_cough_path)
+        self.write_csv(
+            self._cough_table_path(),
+            COUGH_TABLE_FIELDS,
+            [self.make_cough_row(filename="listed.wav", pub_cough_id="2")],
+        )
+
+        with patch.object(settings, "PUBLIC_COUGH", os.path.join(self._temp_media_path, "public_cough")), patch(
+            "CoughToMusic.services.library._is_blank_cough_audio",
+            return_value=False,
+        ):
+            response = archive_blank_cough_payload({"userId": self.user_id, "filename": "listed.wav"})
+
+        self.assertFalse(response["archived"])
+        self.assertFalse(response["isBlank"])
+        self.assert_file_exists(active_cough_path)
+        self.assert_file_exists(public_cough_path)
+        self.assert_csv_has_rows(
+            self._cough_table_path(),
+            [self.make_cough_row(filename="listed.wav", pub_cough_id="2")],
+        )
+        self.assertFalse(os.path.exists(self._cough_archive_table_path()))

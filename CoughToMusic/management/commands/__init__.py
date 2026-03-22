@@ -1,0 +1,1 @@
+"""CoughToMusic management commands."""

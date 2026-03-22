@@ -42,7 +42,6 @@ def save_wav_with_resample(filename, data, target_rate=16000):
         print(f"Error saving wav: {e}")
         raise
 
-  
 def generate_music(user_id, cough_path, filename, bass_music = "tuba", alto_music = "clarinet", high_music = "flute", sample_rate = 16000):
     from .lib import cough
 
@@ -278,6 +277,79 @@ def fake_cough_dist(cough_path, sample_rate=16000):
     audio_data, sr = librosa.load(cough_path, sr=sample_rate)
     result = Fake_cough_filter.detect_inhale(audio_data, sr)
     return result
+
+
+def is_blank(wav_path, *, audio_loader=None, onset_module=None, freq_module=None, configs=None):
+    # Enable narrow local debugging without turning normal uploads into noisy logs.
+    debug_enabled = os.environ.get("COUGHTOMUSIC_BLANK_DEBUG") == "1"
+
+    def _debug(message):
+        if debug_enabled:
+            print(f"[is_blank] {os.path.basename(wav_path)}: {message}", flush=True)
+
+    if audio_loader is None:
+        import librosa
+
+        audio_loader = librosa.load
+    if onset_module is None or freq_module is None or configs is None:
+        from .cocreate.lib.cough_to_midi import freq as imported_freq, onset as imported_onset
+        from .cocreate.workflow_common import ACC_CONFIG, BASS_CONFIG, MEL_CONFIG
+
+        onset_module = onset_module or imported_onset
+        freq_module = freq_module or imported_freq
+        configs = configs or (MEL_CONFIG, ACC_CONFIG, BASS_CONFIG)
+
+    _debug("loading audio")
+    audio_data, sample_rate = audio_loader(wav_path, sr=None, mono=True)
+    audio_data = np.asarray(audio_data)
+    _debug(f"loaded samples={audio_data.size} sample_rate={sample_rate}")
+    if audio_data.size == 0 or np.ptp(audio_data) <= 1e-6 or np.max(np.abs(audio_data)) <= 1e-6:
+        _debug("rejected as blank due to empty/flat waveform")
+        return True
+
+    _debug("running onset detection")
+    onset_times = onset_module.detect(audio_data, sample_rate)
+    _debug(f"onset_count={len(onset_times)}")
+    if len(onset_times) == 0:
+        _debug("rejected as blank due to missing onset")
+        return True
+
+    audio_duration = len(audio_data) / float(sample_rate) if sample_rate else 0
+
+    for index, config in enumerate(configs, start=1):
+        _debug(
+            "running crepe/note pass "
+            f"{index}/{len(configs)} threshold={config['threshold']} energy_th={config['energy_th']}"
+        )
+        _, f0 = freq_module.get_by_crepe(
+            audio_data,
+            sample_rate,
+            config["threshold"],
+            energy_threshold=config["energy_th"],
+        )
+        f0_scaled = freq_module.log_scale_frequencies(f0, config["min_target"], config["max_target"])
+        result_array, notes_on_frame, notes_off_frame = freq_module.to_note_msg(
+            onset_times,
+            f0_scaled,
+            config["freq_range_th"],
+            config["note_interval_th"],
+            60,
+            audio_duration,
+        )
+        if (
+            len(result_array) > 0
+            and len(notes_on_frame) > 0
+            and len(notes_off_frame) > 0
+            and not all(p <= 1e-3 for p in result_array)
+        ):
+            _debug(
+                "accepted as non-blank with "
+                f"notes={len(result_array)} onsets={len(notes_on_frame)} offsets={len(notes_off_frame)}"
+            )
+            return False
+
+    _debug("rejected as blank because no config produced usable notes")
+    return True
 
 
 def filter_coughs(audio_path):
