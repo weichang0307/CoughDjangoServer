@@ -505,10 +505,19 @@ def interpolated_groove(start_path, end_path, interp_output_path, steps =2):
     groovae_model = TrainedModel(config_4_bar, batch_size=1, checkpoint_dir_or_path=model_path)
     start_note_seq, end_note_seq = path_to_note_seq(start_path, end_path)
 
-    start_tensor = config_4_bar.data_converter.from_tensors(config_4_bar.data_converter.to_tensors(start_note_seq).outputs)[0]
+    start_outputs = config_4_bar.data_converter.to_tensors(start_note_seq).outputs
+    end_outputs = config_4_bar.data_converter.to_tensors(end_note_seq).outputs
+    start_tensors = config_4_bar.data_converter.from_tensors(start_outputs)
+    end_tensors = config_4_bar.data_converter.from_tensors(end_outputs)
+    if not start_tensors or not end_tensors:
+        raise ValueError(
+            "Groove interpolation could not tensorize staged drum MIDI inputs for the groovae_4bar model."
+        )
+
+    start_tensor = start_tensors[0]
     # print(f'start_tensor: {start_tensor}')
 
-    end_tensor = config_4_bar.data_converter.from_tensors(config_4_bar.data_converter.to_tensors(end_note_seq).outputs)[0]   
+    end_tensor = end_tensors[0]
     # print(f'end_tensor: {end_tensor}')
     interpolated_seq = groovae_model.interpolate(start_tensor, end_tensor, steps, length=64, temperature=1.5)
     for seq in interpolated_seq:

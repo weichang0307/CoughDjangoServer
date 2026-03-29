@@ -26,7 +26,7 @@ For routine agent work, treat this `README.md` as the default repo guide. `DIAGR
 
 - accepts cough audio uploads from a client
 - stores per-user recordings and metadata
-- filters, classifies, and clusters cough events
+- classifies and clusters cough events
 - generates music from cough inputs in several modes
 - serves cough and music files back to the client
 
@@ -65,14 +65,15 @@ The main flow is:
 1. A client calls `sign_up` to initialize the user folder and CSV files.
 2. A client uploads cough audio through `create_cough_audio`.
 3. The server writes the uploaded audio to `media/<user>/cough_audio/<name>.wav`.
-4. Django runs a local blank-cough viability check that mirrors the co-create onset and pitch-to-note requirements.
-5. Non-blank uploads are then filtered through the YAMNet subprocess worker.
-6. Django runs cough classification and clustering through the same worker boundary.
-7. Django appends metadata to `cough_table.csv`.
-8. If music generation is requested, the controller hands the request to the in-memory runtime queue.
-9. The runtime layer lazily starts the background worker and the worker writes temporary generated outputs under the user folder.
-10. The client polls `generate_status_view`, which reads runtime job state.
-11. The client finalizes output through `save_music` or `save_music_cocreate`.
+4. Django then runs a local blank-cough viability check on the same shared 4-second analysis window used by co-create cough-to-MIDI conversion.
+   The windowing helper trims obvious leading silence, then prefers an onset-anchored 4-second slice with a small pre-roll, and falls back to the highest-energy 4-second slice when no onset is found.
+   `is_blank(...)` uses a lightweight stdlib loader before touching the heavier onset and pitch stack.
+5. Non-blank uploads continue through classification and clustering.
+6. Django appends metadata to `cough_table.csv`.
+7. If music generation is requested, the controller hands the request to the in-memory runtime queue.
+8. The runtime layer lazily starts the background worker and the worker writes temporary generated outputs under the user folder.
+9. The client polls `generate_status_view`, which reads runtime job state.
+10. The client finalizes output through `save_music` or `save_music_cocreate`.
 
 Mental model:
 
@@ -82,6 +83,9 @@ Mental model:
 - a subprocess worker handles YAMNet-based filtering, classification, and clustering.
 - controller, service, and runtime code are split by responsibility so lightweight imports stay cheap.
 - heavy audio and generation libraries are loaded lazily where practical so simple requests and tests do not pay their import cost up front.
+- Django and the YAMNet worker set `NUMBA_CACHE_DIR` to `BASE_DIR/.numba_cache` so fresh-process `librosa` imports do not rely on the shared Windows temp directory.
+  That cache directory is created at process startup and must be writable by the app and worker interpreters.
+- `CoughToMusic/windowing.py` owns the shared 4-second analysis-window rule used by `util.is_blank(...)`, `cough2midi(...)`, and the drum analysis/render helpers in `CoughToMusic/cocreate/lib/drum.py`.
 
 Architecture and request-flow diagrams are in `DIAGRAMS.md`:
 
@@ -98,11 +102,11 @@ User setup:
 Upload and analysis:
 
 - `create_cough_audio` saves the audio file early.
-- It runs `util.is_blank(...)` before any worker, classification, clustering, or public-copy work.
+- It runs `util.is_blank(...)` directly against the saved upload using the shared 4-second analysis window from `CoughToMusic/windowing.py`.
 - Blank uploads are deleted immediately and do not append to the active cough CSV.
-- It then filters the saved file through the subprocess worker boundary.
 - It calls helper code that classifies cough ownership and computes clustering.
-- It may also publish audio into shared public folders.
+- It may also publish a direct filesystem copy of the saved user WAV into shared public folders.
+- Split `_1.wav` and `_2.wav` artifacts are also validated right before their own CSV/public writes, and blank splits are discarded instead of becoming active state.
 
 Generation:
 
@@ -110,6 +114,7 @@ Generation:
 - The runtime layer lazily starts a single background thread and consumes jobs from an in-memory queue.
 - Mode-specific generation is delegated from `CoughToMusic/task.py` into `CoughToMusic/services/generation_modes.py`.
 - Co-create modes then flow through the stable facade in `CoughToMusic/cocreate/workflows.py`, with mode-specific orchestration in `CoughToMusic/cocreate/trio_workflows.py` and `CoughToMusic/cocreate/drum_workflows.py`, adapter seams in `CoughToMusic/cocreate/trio_adapters.py` and `CoughToMusic/cocreate/drum_adapters.py`, and `CoughToMusic/cocreate/storage.py` owning path and CSV lookup concerns.
+- Drum co-create modes still try GrooVAE interpolation first, but if Magenta cannot tensorize the generated drum MIDI they now fall back to a deterministic cumulative motif chain instead of failing the whole job.
 
 Readback:
 
@@ -137,15 +142,14 @@ The upload-to-worker flow is:
 
 1. `create_cough_audio` calls `process_cough_upload`.
 2. `process_cough_upload` writes the uploaded bytes to `media/<user>/cough_audio/<name>.wav`.
-3. Django calls `is_blank(...)`, which dry-runs the co-create onset and CREPE note-segmentation logic against the saved WAV.
-4. If the upload is blank for MIDI generation, Django deletes the WAV and returns without touching the worker, `cough_table.csv`, or `media/public_cough/`.
-5. Otherwise Django calls `filter_coughs(...)`, which sends a JSON payload with the saved file path to the worker using `mode: "filter"`.
-6. The worker reads the WAV from disk, runs noise reduction plus YAMNet-based cough detection, and writes the filtered result back to the same WAV path by default.
-7. Django then calls `classify_cough_event(...)` with `mode: "classify"`.
-8. The worker loads the saved WAV, extracts YAMNet-derived features around detected cough onsets, and returns whether the audio appears to contain user cough, non-user cough, or both.
-9. Django then calls `clustering(...)` with `mode: "cluster"`.
-10. The worker compares YAMNet-derived features from the target cough against template coughs and prior user coughs, then returns a `cluster_id`.
-11. Django appends the final metadata row to `cough_table.csv` and may also write copies into `media/public_cough/`.
+3. Django calls `is_blank(...)`, which dry-runs the co-create onset and CREPE note-segmentation logic against the shared 4-second analysis window selected from the saved WAV.
+   The WAV read itself stays on the lightweight loader path; the heavier audio stack is used only for onset and pitch viability checks.
+4. If the upload is blank for MIDI generation, Django deletes the WAV and returns without touching `cough_table.csv` or `media/public_cough/`.
+5. Otherwise Django calls `classify_cough_event(...)` with `mode: "classify"`.
+6. The worker loads the saved WAV, extracts YAMNet-derived features around detected cough onsets, and returns whether the audio appears to contain user cough, non-user cough, or both.
+7. Django then calls `clustering(...)` with `mode: "cluster"`.
+8. The worker compares YAMNet-derived features from the target cough against template coughs and prior user coughs, then returns a `cluster_id`.
+9. Django appends the final metadata row to `cough_table.csv` and may also write a direct copy of the saved user WAV into `media/public_cough/`.
 
 What goes into the worker:
 
@@ -162,9 +166,9 @@ What comes back out of the worker:
 
 Where the outputs flow next:
 
-- the filtered user upload stays in `media/<user>/cough_audio/`
+- the saved user upload stays in `media/<user>/cough_audio/`
 - `cough_table.csv` is updated with filename, timestamp, coordinates, public cough ID, cluster ID, and `people`
-- if classification indicates mixed user/non-user content, Django writes split `_1.wav` and `_2.wav` files back into the same user cough folder
+- if classification indicates mixed user/non-user content, Django writes split `_1.wav` and `_2.wav` files back into the same user cough folder and validates each one before writing its active CSV/public state
 - public copies may be written to `media/public_cough/`
 - blank existing coughs can be moved out of active storage into `media/<user>/cough_audio/archive/`, with their preserved rows written to `media/<user>/cough_audio/archive/cough_table.csv`
 - archived public cough counterparts move to `media/archive/public_cough/`
@@ -189,6 +193,7 @@ Durable state:
 - archived blank coughs under `media/<user>/cough_audio/archive/` and `media/archive/public_cough/`
 - archived cough rows are preserved in `media/<user>/cough_audio/archive/cough_table.csv`
 - public cough IDs are allocated monotonically across both active and archived public cough files so archived IDs are not reused
+- `.numba_cache/` is a repo-local generated runtime artifact used by Numba-backed audio imports
 
 Not durable:
 
@@ -198,6 +203,7 @@ Not durable:
 Important implication:
 
 - restarting Django loses job state, but not the files already written to disk
+- one-time blank-cleanup runs can still emit noisy `crepe`/TensorFlow/librosa progress and warning output even after the cache fix; use the command's per-file scan logs as the primary progress signal
 
 ## Important Directories
 
@@ -312,8 +318,9 @@ For most changes, real verification still means exercising the relevant HTTP end
 
 The request-level coverage now includes:
 
-- failed-then-successful upload isolation around the `run_cli(...)` seam
-- blank-upload short-circuit coverage before worker/classification/public-copy work
+- blank-upload short-circuit coverage before classification/public-copy work
+- public-copy/source-of-truth coverage for saved user WAVs
+- split-artifact blank suppression coverage
 - `get_coughs` handling for persisted `people` values
 - blank-existing-cough archival coverage for active file moves and archive CSV preservation
 - modular user/library view coverage for CSV reads, CSV updates, file streaming, rename/delete alignment, and shared public uploads
@@ -380,7 +387,8 @@ The current library split is:
 - `cocreate/lib/cough2mid.py` turns a cough WAV into short motif MIDI.
 - `cocreate/lib/generation.py` interpolates melody or drum material with Magenta/MusicVAE checkpoints under `CoughToMusic/cocreate/model/`.
 - `cocreate/lib/drum.py` classifies coughs into drum roles and writes drum MIDI from onset/loudness features.
-- `cocreate/lib/midi.py` normalizes MIDI structure and renders MIDI back to WAV using soundfonts.
+- `cocreate/lib/midi.py` normalizes MIDI structure and renders MIDI back to WAV using soundfonts, then verifies that the rendered WAV exists and is non-empty before returning.
+- Manual and autofill drum generation both keep a non-interpolated fallback path: when GrooVAE tensor extraction fails on the staged drum MIDI, the adapter concatenates eight cumulative 2-bar stages built from motif0 through motif0..motif6 plus a duplicated final stage.
 
 Retired co-create compatibility code is archived under `archive/` instead of staying in the active `CoughToMusic/` package. See `archive/ARCHIVE.md` for the decision log and archived paths.
 

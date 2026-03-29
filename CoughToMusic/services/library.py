@@ -85,7 +85,8 @@ def archive_blank_cough_payload(metadata_dict):
     cough_path = os.path.join(cough_folder, filename)
     _debug_blank_archive(f"{user_id}/{filename}: starting archive_blank_cough_payload")
     if not os.path.exists(cough_path):
-        raise ValueError(f"Cough file {cough_path} does not exist.")
+        _debug_blank_archive(f"{user_id}/{filename}: user cough file is missing; reconciling metadata")
+        return _archive_missing_cough_metadata(cough_folder, filename)
 
     _debug_blank_archive(f"{user_id}/{filename}: checking blank status")
     if not _is_blank_cough_audio(cough_path):
@@ -98,7 +99,8 @@ def archive_blank_cough_payload(metadata_dict):
 
     cough_table_path = os.path.join(cough_folder, "cough_table.csv")
     if not os.path.exists(cough_table_path):
-        raise ValueError(f"Cough table {cough_table_path} does not exist.")
+        _debug_blank_archive(f"{user_id}/{filename}: archiving orphan blank cough without active CSV")
+        return _archive_orphan_blank_cough(cough_folder, filename)
 
     cough_df = pd.read_csv(cough_table_path)
     if "filename" not in cough_df.columns:
@@ -106,7 +108,8 @@ def archive_blank_cough_payload(metadata_dict):
 
     matching_rows = cough_df[cough_df["filename"].astype(str) == filename]
     if matching_rows.empty:
-        raise ValueError(f"No cough row found for {filename}.")
+        _debug_blank_archive(f"{user_id}/{filename}: archiving orphan blank cough without matching CSV row")
+        return _archive_orphan_blank_cough(cough_folder, filename)
 
     archived_rows = matching_rows.to_dict(orient="records")
     pub_cough_id = _resolve_pub_cough_id_from_rows(archived_rows)
@@ -152,22 +155,19 @@ def archive_blank_coughs_for_user(user_id):
     if not os.path.isdir(cough_folder):
         return {"archivedCount": 0, "results": []}
 
-    cough_table_path = os.path.join(cough_folder, "cough_table.csv")
-    if not os.path.exists(cough_table_path):
-        return {"archivedCount": 0, "results": []}
-
-    cough_df = pd.read_csv(cough_table_path)
-    if "filename" not in cough_df.columns:
-        return {"archivedCount": 0, "results": []}
-
     results = []
-    filenames = sorted(
-        {
-            str(filename)
-            for filename in cough_df["filename"].dropna().astype(str).tolist()
-            if filename.endswith(".wav")
-        }
-    )
+    filenames = set(entry_name for entry_name in os.listdir(cough_folder) if entry_name.endswith(".wav"))
+    cough_table_path = os.path.join(cough_folder, "cough_table.csv")
+    if os.path.exists(cough_table_path):
+        cough_df = pd.read_csv(cough_table_path)
+        if "filename" in cough_df.columns:
+            filenames.update(
+                str(filename)
+                for filename in cough_df["filename"].dropna().astype(str).tolist()
+                if filename.endswith(".wav")
+            )
+
+    filenames = sorted(filenames)
     for filename in filenames:
         result = archive_blank_cough_payload({"userId": user_id, "filename": filename})
         if result.get("archived"):
@@ -439,6 +439,81 @@ def _move_file(source_path, target_path):
     if os.path.exists(target_path):
         os.remove(target_path)
     shutil.move(source_path, target_path)
+
+
+def _archive_missing_cough_metadata(cough_folder, filename):
+    cough_table_path = os.path.join(cough_folder, "cough_table.csv")
+    if not os.path.exists(cough_table_path):
+        return {
+            "archived": False,
+            "isBlank": False,
+            "filename": filename,
+            "missingFile": True,
+            "message": "Cough file is already missing from active storage.",
+        }
+
+    cough_df = pd.read_csv(cough_table_path)
+    if "filename" not in cough_df.columns:
+        return {
+            "archived": False,
+            "isBlank": False,
+            "filename": filename,
+            "missingFile": True,
+            "message": "Cough file is missing and cough_table.csv has no filename column.",
+        }
+
+    matching_rows = cough_df[cough_df["filename"].astype(str) == filename]
+    if matching_rows.empty:
+        return {
+            "archived": False,
+            "isBlank": False,
+            "filename": filename,
+            "missingFile": True,
+            "message": "Cough file is already missing from active storage.",
+        }
+
+    archived_rows = matching_rows.to_dict(orient="records")
+    pub_cough_id = _resolve_pub_cough_id_from_rows(archived_rows)
+    if pub_cough_id not in (None, "", "-1"):
+        public_cough_path = os.path.join(settings.PUBLIC_COUGH, f"{pub_cough_id}.wav")
+        public_archive_path = os.path.join(settings.MEDIA_ROOT, "archive", "public_cough", f"{pub_cough_id}.wav")
+        if os.path.exists(public_cough_path):
+            _debug_blank_archive(
+                f"{os.path.basename(cough_folder)}/{filename}: moving public cough for missing user file to archive"
+            )
+            _move_file(public_cough_path, public_archive_path)
+
+    archive_folder = os.path.join(cough_folder, "archive")
+    archive_csv_path = os.path.join(archive_folder, "cough_table.csv")
+    _write_archive_rows(archive_csv_path, archived_rows)
+    cough_df = cough_df[cough_df["filename"].astype(str) != filename]
+    cough_df.to_csv(cough_table_path, index=False)
+    return {
+        "archived": True,
+        "isBlank": False,
+        "filename": filename,
+        "pubCoughID": pub_cough_id,
+        "missingFile": True,
+        "csvUpdated": True,
+        "message": "Missing cough metadata archived and removed from active CSV.",
+    }
+
+
+def _archive_orphan_blank_cough(cough_folder, filename):
+    archive_folder = os.path.join(cough_folder, "archive")
+    os.makedirs(archive_folder, exist_ok=True)
+    source_path = os.path.join(cough_folder, filename)
+    target_path = os.path.join(archive_folder, filename)
+    _debug_blank_archive(f"{os.path.basename(cough_folder)}/{filename}: moving orphan user cough to archive")
+    _move_file(source_path, target_path)
+    return {
+        "archived": True,
+        "isBlank": True,
+        "filename": filename,
+        "pubCoughID": "-1",
+        "csvUpdated": False,
+        "message": "Blank orphan cough archived without CSV/public metadata.",
+    }
 
 
 def _debug_blank_archive(message):

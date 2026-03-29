@@ -1,6 +1,7 @@
 import csv
 import sys
 import types
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -257,6 +258,145 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
         self.assertIsInstance(result, DrumAutofillResult)
         self.assertEqual(result.used_public_paths, used_public_paths)
         self.assertEqual(result.generated_music, str(Path("temp_drum") / "job-1_drum.wav"))
+
+    def test_generate_manual_drum_falls_back_to_cumulative_stage_concatenation(self):
+        from CoughToMusic.cocreate import drum_adapters
+
+        cough_paths = [Path(f"cough-{index}.wav") for index in range(7)]
+        Path("temp_drum").mkdir(parents=True, exist_ok=True)
+        selected_coughs = {
+            "kick": "cough-0",
+            "snare": "cough-1",
+            "closed_hihat": "cough-2",
+            "open_hihat": "cough-3",
+            "mid_tom": "cough-4",
+            "low_tom": "cough-5",
+            "crash": "cough-6",
+        }
+        midi_calls = {"render": None}
+        fallback_calls = {}
+
+        def fake_write_midi_pretty_manual(selected_subset, df, cough_path_list, output_midi):
+            Path(output_midi).write_bytes(b"mid")
+
+        def fake_adjust_to_2bars(source, dest):
+            Path(dest).write_bytes(b"mid")
+
+        def fake_snap_on_grid_noteseq(source, dest, quantization_level):
+            Path(dest).write_bytes(b"mid")
+
+        def fake_concatenate(midi_files, output_file_path, sec=4.0):
+            Path(output_file_path).write_bytes(b"mid")
+
+        def fake_write_from_midi(midi_file, output_file, sf="drum"):
+            midi_calls["render"] = midi_file
+
+        def fake_interpolated_groove(*args, **kwargs):
+            raise ValueError("cannot tensorize")
+
+        def fake_fallback(stage_paths, output_path):
+            fallback_calls["stage_paths"] = list(stage_paths)
+            fallback_calls["output_path"] = output_path
+            Path(output_path).write_bytes(b"mid")
+            return output_path
+
+        midi_module = types.SimpleNamespace(
+            adjust_to_2bars=fake_adjust_to_2bars,
+            write_from_midi=fake_write_from_midi,
+            snap_on_grid_noteseq=fake_snap_on_grid_noteseq,
+            concatenate=fake_concatenate,
+        )
+        drum_module = types.ModuleType("CoughToMusic.cocreate.lib.drum")
+        drum_module.process_manual_coughs = lambda *args, **kwargs: (selected_coughs, object())
+        drum_module.write_midi_pretty_manual = fake_write_midi_pretty_manual
+        generation_module = types.ModuleType("CoughToMusic.cocreate.lib.generation")
+        generation_module.concatenate_sequences = lambda *args, **kwargs: None
+        generation_module.concate_interpolation = lambda *args, **kwargs: None
+        generation_module.interpolated_groove = fake_interpolated_groove
+        generation_module.path_to_note_seq = lambda *args, **kwargs: ("start", "end")
+        lib_module = types.ModuleType("CoughToMusic.cocreate.lib")
+        lib_module.midi = midi_module
+
+        with patch.object(
+            drum_adapters,
+            "_concatenate_drum_stage_midis",
+            side_effect=fake_fallback,
+        ), patch.dict(
+            sys.modules,
+            {
+                "CoughToMusic.cocreate.lib": lib_module,
+                "CoughToMusic.cocreate.lib.drum": drum_module,
+                "CoughToMusic.cocreate.lib.generation": generation_module,
+            },
+        ):
+            generated_music, motif_paths = drum_adapters.generate_manual_drum(cough_paths, "temp_drum", "job-1")
+
+        self.assertEqual(generated_music, str(Path("temp_drum") / "job-1_drum.wav"))
+        self.assertEqual(len(motif_paths), 7)
+        self.assertEqual(len(fallback_calls["stage_paths"]), 8)
+        self.assertTrue(fallback_calls["stage_paths"][-1].endswith("job-1_fallback_last2.mid"))
+        self.assertEqual(midi_calls["render"], str(Path("temp_drum") / "job-1_fallback_concat.mid"))
+
+    def test_write_from_midi_raises_when_fluidsynth_produces_no_output(self):
+        from CoughToMusic.cocreate.lib import midi as midi_lib
+
+        fake_root = Path(self._temp_media_path) / "render-root"
+        soundfont_path = fake_root / "CoughToMusic" / "cocreate" / "soundfonts" / "alex_gm.sf2"
+        fluidsynth_path = fake_root / "Library" / "bin" / "fluidsynth.exe"
+        midi_path = fake_root / "input.mid"
+        output_path = fake_root / "output.wav"
+        soundfont_path.parent.mkdir(parents=True, exist_ok=True)
+        fluidsynth_path.parent.mkdir(parents=True, exist_ok=True)
+        midi_path.parent.mkdir(parents=True, exist_ok=True)
+        soundfont_path.write_bytes(b"sf2")
+        fluidsynth_path.write_bytes(b"exe")
+        midi_path.write_bytes(b"mid")
+
+        def fake_run(*args, **kwargs):
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        with patch.dict(os.environ, {"CONDA_PREFIX": str(fake_root)}), patch(
+            "CoughToMusic.cocreate.lib.midi.os.getcwd", return_value=str(fake_root)
+        ), patch("CoughToMusic.cocreate.lib.midi.shutil.which", return_value=None), patch(
+            "CoughToMusic.cocreate.lib.midi.subprocess.run", side_effect=fake_run
+        ), patch(
+            "CoughToMusic.cocreate.lib.midi.audio.gain_db_from_wav"
+        ) as gain_mock:
+            with self.assertRaisesRegex(RuntimeError, "did not produce output WAV"):
+                midi_lib.write_from_midi(str(midi_path), str(output_path), "drum")
+
+        gain_mock.assert_not_called()
+
+    def test_write_from_midi_honors_valid_render_output(self):
+        from CoughToMusic.cocreate.lib import midi as midi_lib
+
+        fake_root = Path(self._temp_media_path) / "render-root-ok"
+        soundfont_path = fake_root / "CoughToMusic" / "cocreate" / "soundfonts" / "alex_gm.sf2"
+        fluidsynth_path = fake_root / "Library" / "bin" / "fluidsynth.exe"
+        midi_path = fake_root / "input.mid"
+        output_path = fake_root / "output.wav"
+        soundfont_path.parent.mkdir(parents=True, exist_ok=True)
+        fluidsynth_path.parent.mkdir(parents=True, exist_ok=True)
+        midi_path.parent.mkdir(parents=True, exist_ok=True)
+        soundfont_path.write_bytes(b"sf2")
+        fluidsynth_path.write_bytes(b"exe")
+        midi_path.write_bytes(b"mid")
+
+        def fake_run(*args, **kwargs):
+            output_path.write_bytes(b"wav")
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        with patch.dict(os.environ, {"CONDA_PREFIX": str(fake_root)}), patch(
+            "CoughToMusic.cocreate.lib.midi.os.getcwd", return_value=str(fake_root)
+        ), patch("CoughToMusic.cocreate.lib.midi.shutil.which", return_value=None), patch(
+            "CoughToMusic.cocreate.lib.midi.subprocess.run", side_effect=fake_run
+        ), patch(
+            "CoughToMusic.cocreate.lib.midi.audio.gain_db_from_wav"
+        ) as gain_mock:
+            midi_lib.write_from_midi(str(midi_path), str(output_path), "drum")
+
+        gain_mock.assert_called_once_with(str(output_path), 5)
+        self.assert_file_exists(str(output_path))
 
     def test_cocreate_package_exports_contracts_only(self):
         from CoughToMusic import cocreate

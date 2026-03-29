@@ -7,6 +7,7 @@ import io
 from .table import update_music_table
 import numpy as np
 from .utils.runner import run_cli
+from .windowing import detect_onsets, select_analysis_window
 
 
 def save_pcm16_to_wav(filename, data, rate):
@@ -288,21 +289,32 @@ def is_blank(wav_path, *, audio_loader=None, onset_module=None, freq_module=None
             print(f"[is_blank] {os.path.basename(wav_path)}: {message}", flush=True)
 
     if audio_loader is None:
-        import librosa
-
-        audio_loader = librosa.load
+        _debug("using lightweight wav loader")
+        audio_loader = _load_wav_audio
     if onset_module is None or freq_module is None or configs is None:
-        from .cocreate.lib.cough_to_midi import freq as imported_freq, onset as imported_onset
+        _debug("importing blank-detection onset/freq helpers and configs")
         from .cocreate.workflow_common import ACC_CONFIG, BASS_CONFIG, MEL_CONFIG
 
-        onset_module = onset_module or imported_onset
-        freq_module = freq_module or imported_freq
+        onset_module = onset_module or _BlankOnsetModule()
+        freq_module = freq_module or _BlankFreqModule()
         configs = configs or (MEL_CONFIG, ACC_CONFIG, BASS_CONFIG)
+        _debug("finished blank-detection helper/config imports")
 
     _debug("loading audio")
     audio_data, sample_rate = audio_loader(wav_path, sr=None, mono=True)
     audio_data = np.asarray(audio_data)
     _debug(f"loaded samples={audio_data.size} sample_rate={sample_rate}")
+
+    analysis_audio, window_info = select_analysis_window(audio_data, sample_rate)
+    audio_data = np.asarray(analysis_audio)
+    _debug(
+        "analysis window "
+        f"reason={window_info.get('reason')} "
+        f"start_sample={window_info.get('window_start_sample')} "
+        f"end_sample={window_info.get('window_end_sample')} "
+        f"target_samples={window_info.get('target_samples')}"
+    )
+
     if audio_data.size == 0 or np.ptp(audio_data) <= 1e-6 or np.max(np.abs(audio_data)) <= 1e-6:
         _debug("rejected as blank due to empty/flat waveform")
         return True
@@ -350,6 +362,179 @@ def is_blank(wav_path, *, audio_loader=None, onset_module=None, freq_module=None
 
     _debug("rejected as blank because no config produced usable notes")
     return True
+
+
+def _load_wav_audio(wav_path, sr=None, mono=True):
+    """Load PCM WAV data without importing librosa."""
+    with wave.open(wav_path, "rb") as wav_file:
+        sample_rate = wav_file.getframerate()
+        frame_count = wav_file.getnframes()
+        channel_count = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        raw_frames = wav_file.readframes(frame_count)
+
+    audio_data = _decode_wav_frames(raw_frames, sample_width, channel_count)
+    if mono and audio_data.ndim > 1:
+        audio_data = audio_data.mean(axis=1)
+    if sr is not None and sr != sample_rate:
+        raise ValueError("Lightweight WAV loader does not resample audio.")
+    return audio_data.astype(np.float32, copy=False), sample_rate
+
+
+def _decode_wav_frames(raw_frames, sample_width, channel_count):
+    if sample_width == 1:
+        audio = np.frombuffer(raw_frames, dtype=np.uint8).astype(np.float32)
+        audio = (audio - 128.0) / 128.0
+    elif sample_width == 2:
+        audio = np.frombuffer(raw_frames, dtype="<i2").astype(np.float32) / 32768.0
+    elif sample_width == 3:
+        audio = _decode_pcm24(raw_frames)
+    elif sample_width == 4:
+        audio = np.frombuffer(raw_frames, dtype="<i4").astype(np.float32) / 2147483648.0
+    else:
+        raise ValueError(f"Unsupported WAV sample width: {sample_width}")
+
+    if channel_count > 1:
+        frame_count = len(audio) // channel_count
+        audio = audio[: frame_count * channel_count].reshape(frame_count, channel_count)
+    return audio
+
+
+def _decode_pcm24(raw_frames):
+    byte_count = len(raw_frames) // 3
+    bytes_array = np.frombuffer(raw_frames[: byte_count * 3], dtype=np.uint8).reshape(byte_count, 3)
+    signed = (
+        bytes_array[:, 0].astype(np.int32)
+        | (bytes_array[:, 1].astype(np.int32) << 8)
+        | (bytes_array[:, 2].astype(np.int32) << 16)
+    )
+    sign_bit = 1 << 23
+    signed = (signed ^ sign_bit) - sign_bit
+    return signed.astype(np.float32) / 8388608.0
+
+
+class _BlankOnsetModule:
+    @staticmethod
+    def detect(audio_data, sr, initial_threshold=0.2, min_threshold=0.05, step=0.05):
+        return detect_onsets(audio_data, sr, initial_threshold, min_threshold, step)
+
+
+class _BlankFreqModule:
+    @staticmethod
+    def get_by_crepe(audio_data, sr, threshold, energy_threshold, energy_filter=True):
+        import crepe
+        import librosa
+
+        time, frequency, confidence, _ = crepe.predict(audio_data, sr=sr, viterbi=True)
+        frequency = np.where(confidence < threshold, np.nan, frequency)
+        if energy_filter:
+            spectrogram = librosa.feature.melspectrogram(y=audio_data, sr=sr, n_mels=128, fmax=8000)
+            mel_times = librosa.frames_to_time(np.arange(spectrogram.shape[1]), sr=sr, hop_length=512)
+            spectrogram_db = librosa.power_to_db(spectrogram, ref=np.max)
+            energy_mask = np.interp(time, mel_times, spectrogram_db.max(axis=0)) > energy_threshold
+            frequency = np.where(energy_mask, frequency, np.nan)
+        return time, frequency
+
+    @staticmethod
+    def log_scale_frequencies(frequencies, min_target, max_target):
+        import librosa
+
+        valid_freqs = frequencies[~np.isnan(frequencies) & (frequencies > 0)]
+        if len(valid_freqs) == 0:
+            return frequencies
+
+        fmin_input = np.min(valid_freqs)
+        fmax_input = np.max(valid_freqs)
+        if np.isclose(fmax_input, fmin_input):
+            return np.asarray(frequencies)
+        log_fmin_input = np.log2(fmin_input)
+        log_fmax_input = np.log2(fmax_input)
+        fmin_target = librosa.note_to_hz(min_target)
+        fmax_target = librosa.note_to_hz(max_target)
+
+        scaled = []
+        for frequency in frequencies:
+            if np.isnan(frequency) or frequency <= 0:
+                scaled.append(frequency)
+                continue
+            log_freq = np.log2(frequency)
+            scaled_log_freq = (log_freq - log_fmin_input) / (log_fmax_input - log_fmin_input)
+            scaled_log_freq = scaled_log_freq * (np.log2(fmax_target) - np.log2(fmin_target)) + np.log2(fmin_target)
+            scaled.append(2 ** scaled_log_freq)
+        return np.asarray(scaled)
+
+    @staticmethod
+    def to_note_msg(onset_time, f0, freq_range_th, note_interval_th, break_th, wavefile_time):
+        onset_point = _seconds_to_frames(onset_time, wavefile_time, f0)
+        result_array = []
+        time_start_array = []
+        time_end_array = []
+
+        def process_interval(start, end):
+            temp_array = []
+            nan_count = 0
+            freq_seen = 0
+            nan_token = 0
+
+            for frame_index in range(start, end):
+                if np.isnan(f0[frame_index]):
+                    if freq_seen:
+                        nan_count += 1
+                        freq_seen = 0
+                    else:
+                        if nan_count > note_interval_th:
+                            if temp_array:
+                                average_freq = np.mean(temp_array)
+                                result_array.append(average_freq)
+                                time_end_array.append(frame_index - nan_count)
+                                temp_array = []
+                                nan_count = 0
+                            elif nan_token < break_th:
+                                nan_token += 1
+                            else:
+                                break
+                        else:
+                            nan_count += 1
+                else:
+                    if not temp_array:
+                        temp_array.append(f0[frame_index])
+                        time_start_array.append(frame_index)
+                        nan_count = 0
+                        freq_seen = 1
+                    else:
+                        average_freq = np.mean(temp_array)
+                        if abs(f0[frame_index] - average_freq) > (freq_range_th * average_freq):
+                            time_end_array.append(frame_index - 1)
+                            result_array.append(average_freq)
+                            temp_array = [f0[frame_index]]
+                            time_start_array.append(frame_index)
+                            nan_count = 0
+                            freq_seen = 1
+                        else:
+                            temp_array.append(f0[frame_index])
+                            nan_count = 0
+                            freq_seen = 1
+
+            if temp_array:
+                average_freq = np.mean(temp_array)
+                result_array.append(average_freq)
+                time_end_array.append(end - 1)
+
+        if len(onset_point) == 0:
+            process_interval(0, len(f0))
+        else:
+            for index, start in enumerate(onset_point):
+                end = onset_point[index + 1] if index < len(onset_point) - 1 else len(f0)
+                process_interval(start, end)
+
+        return np.asarray(result_array), np.asarray(time_start_array), np.asarray(time_end_array)
+
+def _seconds_to_frames(time_array, total_time, f0):
+    onset_time_array = []
+    for onset_time in time_array:
+        frame_value = int((onset_time / total_time) * len(f0)) if total_time else 0
+        onset_time_array.append(frame_value)
+    return np.array(onset_time_array)
 
 
 def filter_coughs(audio_path):

@@ -1,6 +1,8 @@
 import datetime
 import json
 import os
+import shutil
+from threading import Lock
 
 import pandas as pd
 import soundfile as sf
@@ -10,11 +12,13 @@ from ..table import update_cough_table
 from ..util import (
     classify_cough_event,
     clustering,
-    filter_coughs,
     filter_coughs_template,
     is_blank,
     save_pcm16_to_wav,
 )
+
+_UPLOAD_STATS_LOCK = Lock()
+_UPLOAD_STATS = {"total": 0, "blank": 0}
 
 
 def save_template_audio(metadata, audio_data, sample_rate=16000):
@@ -42,12 +46,10 @@ def process_cough_upload(metadata, audio_data, sample_rate=16000):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
     save_pcm16_to_wav(file_path, audio_data, sample_rate)
+    _record_upload_seen()
     if is_blank(file_path):
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        _discard_blank_upload(file_path, user_id, filename)
         return {"IsSaving": "false", "isBlank": True, "message": "Blank cough skipped."}
-
-    filter_coughs(file_path)
 
     user_table_path = os.path.join(settings.MEDIA_ROOT, user_id, f"{user_id}.csv")
     df = pd.read_csv(user_table_path)
@@ -67,7 +69,7 @@ def process_cough_upload(metadata, audio_data, sample_rate=16000):
     pub_cough_id = "-1"
 
     if is_cough_pub and not (has_non_user_cough and has_user_cough):
-        pub_cough_id = _save_public_cough_copy(audio_data, sample_rate)
+        pub_cough_id = _save_public_cough_copy(file_path)
 
     cough_table_data = {
         "filename": filename,
@@ -101,12 +103,12 @@ def process_cough_upload(metadata, audio_data, sample_rate=16000):
     return {"IsSaving": "true", "message": "Audio data received successfully."}
 
 
-def _save_public_cough_copy(audio_data, sample_rate):
+def _save_public_cough_copy(file_path):
     folder_path_public = os.path.join(settings.MEDIA_ROOT, "public_cough")
     pub_cough_id = _next_public_cough_id()
     file_path_public = os.path.join(folder_path_public, f"{pub_cough_id}.wav")
-    save_pcm16_to_wav(file_path_public, audio_data, sample_rate)
-    filter_coughs(file_path_public)
+    os.makedirs(folder_path_public, exist_ok=True)
+    shutil.copy2(file_path, file_path_public)
     return pub_cough_id
 
 
@@ -122,48 +124,29 @@ def _save_split_classification_outputs(
 ):
     user_filename = os.path.join(all_cough_file_path, filename.replace(".wav", "") + "_1.wav")
     non_user_filename = os.path.join(all_cough_file_path, filename.replace(".wav", "") + "_2.wav")
-    sf.write(user_filename, classification_result["user_output"], classification_result["sample_rate"])
-    sf.write(non_user_filename, classification_result["non_user_output"], classification_result["sample_rate"])
-
-    folder_path_public = os.path.join(settings.MEDIA_ROOT, "public_cough")
-    first_public_id = _next_public_cough_id()
-    update_cough_table(
-        user_id,
-        {
-            "filename": filename.replace(".wav", "") + "_1.wav",
-            "timestamp": time_stamp,
-            "pubCoughID": first_public_id,
-            "time": time_value,
-            "latitude": latitude,
-            "longitude": longitude,
-            "clusterID": 0,
-            "people": False,
-        },
+    _persist_split_cough_output(
+        user_id=user_id,
+        file_path=user_filename,
+        filename=f"{filename.replace('.wav', '')}_1.wav",
+        audio_data=classification_result["user_output"],
+        sample_rate=classification_result["sample_rate"],
+        timestamp=time_stamp,
+        time_value=time_value,
+        latitude=latitude,
+        longitude=longitude,
+        cluster_id=0,
     )
-    sf.write(
-        os.path.join(folder_path_public, f"{first_public_id}.wav"),
-        classification_result["user_output"],
-        classification_result["sample_rate"],
-    )
-
-    second_public_id = _next_public_cough_id()
-    update_cough_table(
-        user_id,
-        {
-            "filename": filename.replace(".wav", "") + "_2.wav",
-            "timestamp": time_stamp,
-            "pubCoughID": second_public_id,
-            "time": time_value,
-            "latitude": latitude,
-            "longitude": longitude,
-            "clusterID": 1,
-            "people": False,
-        },
-    )
-    sf.write(
-        os.path.join(folder_path_public, f"{second_public_id}.wav"),
-        classification_result["non_user_output"],
-        classification_result["sample_rate"],
+    _persist_split_cough_output(
+        user_id=user_id,
+        file_path=non_user_filename,
+        filename=f"{filename.replace('.wav', '')}_2.wav",
+        audio_data=classification_result["non_user_output"],
+        sample_rate=classification_result["sample_rate"],
+        timestamp=time_stamp,
+        time_value=time_value,
+        latitude=latitude,
+        longitude=longitude,
+        cluster_id=1,
     )
 
 
@@ -191,3 +174,70 @@ def _build_wav_name(stem):
     if not isinstance(filename, str):
         raise ValueError("Invalid filename format")
     return filename
+
+
+def _record_upload_seen():
+    with _UPLOAD_STATS_LOCK:
+        _UPLOAD_STATS["total"] += 1
+
+
+def _record_blank_upload():
+    with _UPLOAD_STATS_LOCK:
+        _UPLOAD_STATS["blank"] += 1
+        return _UPLOAD_STATS["blank"], _UPLOAD_STATS["total"]
+
+
+def _log_blank_upload(user_id, filename, blank_count, total_count):
+    yellow = "\033[93m"
+    reset = "\033[0m"
+    print(
+        f"{yellow}[blank-upload] user={user_id} file={filename} "
+        f"blank_count={blank_count} total_uploads={total_count}{reset}"
+    )
+
+
+def _discard_blank_upload(file_path, user_id, filename):
+    blank_count, total_count = _record_blank_upload()
+    _log_blank_upload(user_id, filename, blank_count, total_count)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+
+def _persist_split_cough_output(
+    *,
+    user_id,
+    file_path,
+    filename,
+    audio_data,
+    sample_rate,
+    timestamp,
+    time_value,
+    latitude,
+    longitude,
+    cluster_id,
+):
+    sf.write(file_path, audio_data, sample_rate)
+    if is_blank(file_path):
+        _discard_blank_upload(file_path, user_id, filename)
+        return False
+
+    public_cough_id = _next_public_cough_id()
+    update_cough_table(
+        user_id,
+        {
+            "filename": filename,
+            "timestamp": timestamp,
+            "pubCoughID": public_cough_id,
+            "time": time_value,
+            "latitude": latitude,
+            "longitude": longitude,
+            "clusterID": cluster_id,
+            "people": False,
+        },
+    )
+    sf.write(
+        os.path.join(settings.MEDIA_ROOT, "public_cough", f"{public_cough_id}.wav"),
+        audio_data,
+        sample_rate,
+    )
+    return True

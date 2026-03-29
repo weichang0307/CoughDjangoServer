@@ -7,7 +7,7 @@ import noisereduce
 import pretty_midi
 from pydub import AudioSegment
 import soundfile as sf
-from pedalboard import Pedalboard, Gain, Reverb
+# from pedalboard import Pedalboard, Gain, Reverb
 
 
 def load_from_dir(audio_path):

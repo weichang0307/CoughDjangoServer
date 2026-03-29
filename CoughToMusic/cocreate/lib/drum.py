@@ -10,6 +10,7 @@ from cough_to_midi.onset import *
 import audio
 import pretty_midi
 import midi
+from CoughToMusic.windowing import select_analysis_window
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,12 @@ def compute_durations(onset_times, offset_times):
 
 def compute_loudness(audio_segment):
     return np.mean(np.abs(audio_segment))
+
+
+def _load_windowed_cough(audio_path):
+    audio_data, sr = audio.load_from_file(audio_path)
+    windowed_audio, window_info = select_analysis_window(audio_data, sr)
+    return windowed_audio, sr, window_info
 
 def visualize_cough(audio_data, sr, file_index, onset_times, offset_times, durations):
     plt.figure(figsize=(6, 4))
@@ -235,7 +242,7 @@ def write_midi_pretty(selected_coughs, df, folder_path, output_midi, db_scale=30
         if not os.path.exists(audio_path):
             logger.warning("File %s not found.", audio_path)
             continue
-        audio_data, sr = audio.load_from_file(audio_path)
+        audio_data, sr, _ = _load_windowed_cough(audio_path)
         # print(f"Processing {cough_id}...", "drum_type:", drum_type)
         onset_times = detect(audio_data, sr)
         onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
@@ -330,7 +337,7 @@ def write_midi_pretty_manual(selected_coughs, df, cough_path_list, output_midi, 
         if not os.path.exists(audio_path):
             logger.warning("File %s not found.", audio_path)
             continue
-        audio_data, sr = audio.load_from_file(audio_path)
+        audio_data, sr, _ = _load_windowed_cough(audio_path)
         onset_times = detect(audio_data, sr)
         onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
         
@@ -371,7 +378,7 @@ def process_manual_coughs(cough_path_list, seed=42):
     data = []
     for path in cough_path_list:
         file_name = os.path.splitext(os.path.basename(path))[0]
-        audio_data, sr = audio.load_from_file(path)
+        audio_data, sr, _ = _load_windowed_cough(path)
         onset_times = detect(audio_data, sr)
         onset_times, offset_times = detect_offsets(audio_data, sr, onset_times)
         durations = compute_durations(onset_times, offset_times)

@@ -1,39 +1,22 @@
-import audio, midi
-from cough_to_midi import freq, onset
-import glob
-import os
-import random
-import itertools
 import logging
-import numpy as np
-import soundfile as sf
-from music21 import converter, key, interval
-import pretty_midi
 from pathlib import Path
-import librosa
-import audio
+from CoughToMusic.windowing import select_analysis_window
 
 logger = logging.getLogger(__name__)
-def normalize_wav_length(input_path, output_path, target_length_sec):
-
-    y, sr = librosa.load(input_path, sr=None)   
-    target_length_samples = int(target_length_sec * sr)   
-    y_resampled = librosa.util.fix_length(y, size=target_length_samples)  
-    sf.write(output_path, y_resampled, sr)
-    audio.remove_silence_from_start(output_path, silence_threshold=-80.0, chunk_size=1) #trim the beginning of coughs
-    audio.padd_to_4_seconds(output_path)
 
 def cough_to_midi_wavs(
     threshold, freq_range_th, note_interval_th, min_target, max_target, energy_th, folder_path, out_dir):
+    import audio
+    import midi
+    from cough_to_midi import freq
+
     recorded_coughs = Path("recorded_coughs").glob("cough_*.wav")
     for cough in recorded_coughs:
         cough = str(cough)
-        normalize_wav_length(cough, cough, 4.0)
-        # audio.remove_silence_from_start(cough, silence_threshold=-30.0, chunk_size=1) #trim the beginning of coughs
-        file_index = cough.split("_")[-1].split(".")[0]
         cough_data, sample_rate = audio.load_from_file(cough)
+        cough_data, _ = select_analysis_window(cough_data, sample_rate)
+        file_index = cough.split("_")[-1].split(".")[0]
         cough_freq = freq.get_by_crepe(cough_data, sample_rate, threshold, energy_threshold=energy_th)
-        onset_time = onset.detect(cough_data, sample_rate) 
         # midi_file = f"./{out_dir}/{folder_path}_mid/{folder_path}_{file_index}.mid"
         midi_file = str(Path(out_dir) / f"{folder_path}_mid" / f"{folder_path}_{file_index}.mid")
         freq.write_midi(cough_data,sample_rate,cough_freq,midi_file,min_target,max_target,freq_range_th,note_interval_th)
@@ -55,9 +38,12 @@ def cough_to_midi_wavs(
 
 def cough2midi(cough_pth, motif_pth, threshold, freq_range_th, note_interval_th,
                min_target, max_target, energy_th, tried_fallback=False):
+    import audio
+    import midi
+    from cough_to_midi import freq
 
-    normalize_wav_length(cough_pth, cough_pth, 4.0)
     cough_data, sample_rate = audio.load_from_file(cough_pth)
+    cough_data, _ = select_analysis_window(cough_data, sample_rate)
     
     cough_freq = freq.get_by_crepe(cough_data, sample_rate, threshold, energy_threshold=energy_th)
     # print(f"cough_freq: {cough_freq}")
@@ -85,5 +71,7 @@ def cough2midi(cough_pth, motif_pth, threshold, freq_range_th, note_interval_th,
     return True
 
 def correct_key(melody_pth, ref_pth):
+    import midi
+
     midi.correct_midi_to_ref_key(ref_pth, melody_pth)
             

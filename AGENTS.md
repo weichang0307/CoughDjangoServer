@@ -81,10 +81,13 @@ User initialization:
 Upload and analysis:
 
 - `create_cough_audio` writes the uploaded WAV early
-- `util.is_blank(...)` runs before worker filtering and treats uploads as blank when they cannot produce usable onset-plus-pitch MIDI material
+- `util.is_blank(...)` then runs against the saved WAV on the shared 4-second analysis window and treats uploads as blank when they cannot produce usable onset-plus-pitch MIDI material
+- `util.is_blank(...)` now reads WAVs through a lightweight stdlib loader first and only then touches the heavier onset/pitch stack
 - blank uploads are deleted immediately and skip the later upload-analysis flow
-- then filters the file through the subprocess worker boundary
+- `CoughToMusic/windowing.py` owns the shared 4-second window-selection rule used by `util.is_blank(...)`, `cough2midi(...)`, and drum analysis/render helpers in `CoughToMusic/cocreate/lib/drum.py`
 - then classifies and clusters it
+- split `_1.wav` and `_2.wav` classification artifacts are validated right before their own active CSV/public writes
+- the main upload may be copied directly into `media/public_cough/` when publishable
 - then appends rows to `cough_table.csv`
 
 Generation:
@@ -93,6 +96,7 @@ Generation:
 - jobs are queued in-process
 - the runtime layer starts a daemon thread lazily on first generation use
 - `GenerateJob.run()` delegates mode-specific generation to `CoughToMusic/services/generation_modes.py`, which dispatches co-create modes through the stable facade in `CoughToMusic/cocreate/workflows.py`
+- manual/autofill drum generation still prefers GrooVAE interpolation, but if staged drum MIDI cannot be tensorized for interpolation the adapter falls back to concatenating eight cumulative 2-bar motif stages instead of failing the request
 
 Finalize:
 
@@ -221,10 +225,9 @@ Prefer flow-level checks over isolated unit assumptions.
 For upload changes:
 
 - confirm the WAV lands in the expected user folder
-- confirm blank uploads are deleted before worker/filter/classify/cluster/public-copy work begins
+- confirm blank uploads are deleted before classify/cluster/public-copy work begins
 - confirm `cough_table.csv` reflects the intended row state
-- confirm a failed filter request does not poison the next upload in the same Django process
-- prefer request-level tests that fail once and then succeed on a second upload, ideally at the `run_cli(...)` seam if full worker execution is impractical in tests
+- confirm classification or clustering failures do not leave active CSV/public state behind unexpectedly
 - prefer startup probes that verify helper imports do not eagerly load the heavy audio stack or generation helpers
 
 For generation changes:
@@ -233,6 +236,7 @@ For generation changes:
 - confirm status polling still reports usable information
 - confirm temp output is created
 - confirm final save moves output into the expected permanent folder
+- confirm MIDI-to-WAV rendering raises clearly if FluidSynth fails or no WAV is produced
 - confirm runtime startup stays lazy until generation is first requested
 
 For rename/delete changes:
@@ -250,7 +254,7 @@ For blank-cough archival changes:
 Be skeptical of existing tests:
 
 - `CoughToMusic/tests/` now splits coverage by domain so upload, user view, library view, generation runtime, co-create, and import-safety tests can be run independently
-- `CoughToMusic/tests/test_uploads.py` covers failed-then-successful upload behavior around the filter wrapper
+- `CoughToMusic/tests/test_uploads.py` covers blank-upload short-circuit behavior, public-copy/source-of-truth handling, split-artifact blank suppression, and shared analysis-window integration points
 - `CoughToMusic/tests/test_library_views.py` covers the migrated modular library endpoints, including CSV update behavior, file streaming, rename/delete alignment, shared public upload writes, and the CSRF regression probe
 - `CoughToMusic/tests/test_user_views.py` covers the migrated modular user endpoints
 - `CoughToMusic/tests/test_cocreate_refactor.py` covers the stable cocreate public surface, including package exports, `CoCreateResult` payload shape, generation mode dispatch, workflow-to-adapter delegation, and path resolution
@@ -303,3 +307,6 @@ Think of the app as:
 - runtime helpers as the owner of lazy queue startup and in-memory job state
 - YAMNet analysis as a subprocess service
 - heavy audio and generation dependencies should stay lazily imported where practical so lightweight endpoints and tests are not blocked by module-load cost
+- Django and the YAMNet worker set `NUMBA_CACHE_DIR` to `BASE_DIR/.numba_cache` before heavy audio imports so fresh-process `librosa` imports do not depend on the shared temp directory
+- `.numba_cache/` is a repo-local generated runtime artifact and must be writable by the Django and worker interpreters
+- one-time blank-cleanup runs may still emit noisy `crepe`/TensorFlow/librosa logs; rely on the per-file command logs for progress when debugging cleanup behavior

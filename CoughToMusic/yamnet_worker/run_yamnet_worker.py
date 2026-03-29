@@ -1,5 +1,13 @@
 import sys
 import json
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+NUMBA_CACHE_DIR = BASE_DIR / ".numba_cache"
+os.makedirs(NUMBA_CACHE_DIR, exist_ok=True)
+os.environ.setdefault("NUMBA_CACHE_DIR", str(NUMBA_CACHE_DIR))
+
 import numpy as np
 
 from yamnet_loader import get_yamnet_model

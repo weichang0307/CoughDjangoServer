@@ -53,6 +53,12 @@ class RuntimeStartupTests(TestCase):
             ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
         )
 
+    def test_windowing_import_keeps_heavy_modules_lazy(self):
+        self._assert_module_import_is_lazy(
+            "CoughToMusic.windowing",
+            ["librosa", "soundfile", "magenta", "note_seq", "pretty_midi", "tensorflow"],
+        )
+
     def test_cocreate_trio_workflows_import_keeps_heavy_modules_lazy(self):
         self._assert_module_import_is_lazy(
             "CoughToMusic.cocreate.trio_workflows",

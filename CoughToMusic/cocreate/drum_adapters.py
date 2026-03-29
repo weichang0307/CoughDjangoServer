@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -16,6 +20,43 @@ class DrumAutofillResult:
 
 def _drum_temp_file(user_folder: str, name: str) -> str:
     return str(Path(user_folder) / name)
+
+
+def _concatenate_drum_stage_midis(stage_paths: list[str], output_path: str) -> str:
+    import magenta.music as mm
+    import note_seq
+
+    sequences = [note_seq.midi_io.midi_file_to_note_sequence(path) for path in stage_paths]
+    final_seq = mm.sequences_lib.concatenate_sequences(sequences, [4.0] * len(sequences))
+    mm.sequence_proto_to_midi_file(final_seq, output_path)
+    return output_path
+
+
+def _write_cumulative_drum_fallback(
+    cough_seq: list[tuple[str, str]],
+    df,
+    cough_paths: list[str],
+    user_folder: str,
+    job_uuid: str,
+    save_midi,
+) -> str:
+    stage_paths: list[str] = []
+    for i in range(len(cough_seq)):
+        stage_path = _drum_temp_file(user_folder, f"{job_uuid}_fallback_stage{i}.mid")
+        stage_path = save_midi(slice(0, i + 1), stage_path)
+        stage_paths.append(stage_path)
+
+    final_stage = _drum_temp_file(user_folder, f"{job_uuid}_fallback_last2.mid")
+    shutil.copyfile(stage_paths[-1], final_stage)
+    stage_paths.append(final_stage)
+
+    output_path = _drum_temp_file(user_folder, f"{job_uuid}_fallback_concat.mid")
+    logger.warning(
+        "Falling back to cumulative drum concatenation with %d stages for job %s.",
+        len(stage_paths),
+        job_uuid,
+    )
+    return _concatenate_drum_stage_midis(stage_paths, output_path)
 
 
 def generate_manual_drum(cough_path_list: list[Path], user_folder: str, job_uuid: str) -> tuple[str, list[Path]]:
@@ -60,11 +101,27 @@ def generate_manual_drum(cough_path_list: list[Path], user_folder: str, job_uuid
     midi.concatenate([tmp_sec, tmp_third], tmp_third, sec=4.0)
     midi.concatenate([tmp_last, tmp_last], tmp_last2, sec=4.0)
 
-    interpolated_seq = interpolated_groove(tmp_third, tmp_last2, tmp_last)
-    start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
-    concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, tmp_last, target_duration=8.0)
-    concatenate_sequences(tmp_first, tmp_last, tmp_last)
-    midi.write_from_midi(tmp_last, drum_trk)
+    final_midi = tmp_last
+    try:
+        interpolated_seq = interpolated_groove(tmp_third, tmp_last2, tmp_last)
+        start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
+        concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, tmp_last, target_duration=8.0)
+        concatenate_sequences(tmp_first, tmp_last, tmp_last)
+    except Exception as exc:
+        logger.warning(
+            "Drum interpolation failed for job %s: %s. Using cumulative motif fallback.",
+            job_uuid,
+            exc,
+        )
+        final_midi = _write_cumulative_drum_fallback(
+            cough_seq,
+            df,
+            [str(path) for path in cough_path_list],
+            user_folder,
+            job_uuid,
+            save_midi,
+        )
+    midi.write_from_midi(final_midi, drum_trk)
 
     return drum_trk, motif_list
 
@@ -113,11 +170,27 @@ def generate_autofill_drum(cough_path_list: list[Path], user_folder: str, job_uu
     midi.concatenate([tmp_sec, tmp_third], tmp_third, sec=4.0)
     midi.concatenate([tmp_last, tmp_last], tmp_last2, sec=4.0)
 
-    interpolated_seq = interpolated_groove(tmp_third, tmp_last2, tmp_last)
-    start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
-    concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, tmp_last, target_duration=8.0)
-    concatenate_sequences(tmp_first, tmp_last, tmp_last)
-    midi.write_from_midi(tmp_last, drum_trk)
+    final_midi = tmp_last
+    try:
+        interpolated_seq = interpolated_groove(tmp_third, tmp_last2, tmp_last)
+        start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
+        concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, tmp_last, target_duration=8.0)
+        concatenate_sequences(tmp_first, tmp_last, tmp_last)
+    except Exception as exc:
+        logger.warning(
+            "Autofill drum interpolation failed for job %s: %s. Using cumulative motif fallback.",
+            job_uuid,
+            exc,
+        )
+        final_midi = _write_cumulative_drum_fallback(
+            cough_seq,
+            df,
+            list(id_to_path.values()),
+            user_folder,
+            job_uuid,
+            save_midi,
+        )
+    midi.write_from_midi(final_midi, drum_trk)
 
     return DrumAutofillResult(
         generated_music=drum_trk,

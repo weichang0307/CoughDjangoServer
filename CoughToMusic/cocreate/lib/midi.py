@@ -127,9 +127,21 @@ logger = logging.getLogger(__name__)
 def write_from_midi(midi_file, output_file, sf="drum"):
     current_path = os.getcwd()
     conda_env = os.environ.get("CONDA_PREFIX")
+    midi_file = os.path.abspath(midi_file)
+    output_file = os.path.abspath(output_file)
+
+    logger.info(
+        "Rendering MIDI to WAV: midi=%s output=%s soundfont=%s cwd=%s",
+        midi_file,
+        output_file,
+        sf,
+        current_path,
+    )
 
     if not conda_env:
-        raise EnvironmentError("Conda environment not found.")
+        message = "Conda environment not found while rendering MIDI to WAV."
+        logger.error(message)
+        raise EnvironmentError(message)
 
     # Try to locate fluidsynth.exe automatically
     fluidsynth_path = shutil.which("fluidsynth")  
@@ -140,46 +152,69 @@ def write_from_midi(midi_file, output_file, sf="drum"):
     
     # Ensure fluidsynth.exe exists
     if not os.path.exists(fluidsynth_path):
-        raise FileNotFoundError(f"FluidSynth executable not found: {fluidsynth_path}")
+        message = f"FluidSynth executable not found: {fluidsynth_path}"
+        logger.error(message)
+        raise FileNotFoundError(message)
 
     # Define SoundFont Paths (Windows-friendly paths)
     soundfonts = {
         "piano": os.path.join(current_path, "soundfonts", "Yamaha_C3_Grand_Piano.sf2"),
-        "drum": os.path.join(current_path, "CoughToMusic\cocreate\soundfonts", "alex_gm.sf2"),
-        "violin": os.path.join(current_path,  "CoughToMusic\cocreate\soundfonts", "Violin.sf2"),
-        "guitar": os.path.join(current_path, "soundfonts", "Guitar.sf2"), 
+        "drum": os.path.join(current_path, "CoughToMusic", "cocreate", "soundfonts", "alex_gm.sf2"),
+        "violin": os.path.join(current_path, "CoughToMusic", "cocreate", "soundfonts", "Violin.sf2"),
+        "guitar": os.path.join(current_path, "soundfonts", "Guitar.sf2"),
         "saxophone": os.path.join(current_path, "soundfonts", "Saxophone.sf2"),
     }
 
     if sf not in soundfonts:
-        raise ValueError(f"Invalid soundfont type '{sf}'. Choose from {list(soundfonts.keys())}.")
+        message = f"Invalid soundfont type '{sf}'. Choose from {list(soundfonts.keys())}."
+        logger.error(message)
+        raise ValueError(message)
 
     soundfont = soundfonts[sf]
+    logger.info("Using fluidsynth=%s soundfont=%s", fluidsynth_path, soundfont)
 
     if not os.path.exists(soundfont):
-        raise FileNotFoundError(f"SoundFont file not found: {soundfont}")
-
-    # Convert to absolute paths for Windows compatibility
-    midi_file = os.path.abspath(midi_file)
-    output_file = os.path.abspath(output_file)
+        message = f"SoundFont file not found: {soundfont}"
+        logger.error(message)
+        raise FileNotFoundError(message)
 
     if not os.path.exists(midi_file):
-        raise FileNotFoundError(f"MIDI file not found: {midi_file}")
+        message = f"MIDI file not found: {midi_file}"
+        logger.error(message)
+        raise FileNotFoundError(message)
 
     # Run FluidSynth Command
     command = [
         fluidsynth_path, "-ni", soundfont, midi_file, "-F", output_file, "-r", "44100"
     ]
+    logger.info("Running fluidsynth command: %s", " ".join(command))
 
     process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     if process.returncode != 0:
+        stderr = process.stderr.strip()
         logger.error("FluidSynth exited with code %s", process.returncode)
-        logger.error("FluidSynth stderr: %s", process.stderr.strip())
-    elif process.stderr.strip():
+        if stderr:
+            logger.error("FluidSynth stderr: %s", stderr)
+        raise RuntimeError(
+            f"FluidSynth failed for {midi_file} -> {output_file} with exit code {process.returncode}"
+        )
+
+    if process.stderr.strip():
         logger.warning("FluidSynth stderr: %s", process.stderr.strip())
-    else:
-        audio.gain_db_from_wav(output_file, 5)
+
+    if not os.path.exists(output_file):
+        message = f"FluidSynth completed but did not produce output WAV: {output_file}"
+        logger.error(message)
+        raise RuntimeError(message)
+
+    if os.path.getsize(output_file) <= 0:
+        message = f"FluidSynth produced an empty output WAV: {output_file}"
+        logger.error(message)
+        raise RuntimeError(message)
+
+    logger.info("Rendered WAV produced: %s (%d bytes)", output_file, os.path.getsize(output_file))
+    audio.gain_db_from_wav(output_file, 5)
 
 
 #midi meta adjustment

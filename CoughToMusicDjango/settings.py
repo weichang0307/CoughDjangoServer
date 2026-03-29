@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # http setting
@@ -18,6 +19,9 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # 確保 Django �
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+NUMBA_CACHE_DIR = BASE_DIR / ".numba_cache"
+os.makedirs(NUMBA_CACHE_DIR, exist_ok=True)
+os.environ.setdefault("NUMBA_CACHE_DIR", str(NUMBA_CACHE_DIR))
 
 
 # Quick-start development settings - unsuitable for production
@@ -134,10 +138,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOW_ALL_ORIGINS = True  # 或者設置具體的允許來源
 
-
-
-import os
-
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # MEDIA_ROOT = "D:/media"
@@ -194,5 +194,4 @@ os.makedirs(MOTIF_TRIO_WAV, exist_ok=True)
 IMPORT_COUGH_FOLDER  = os.path.join(MEDIA_ROOT, 'import_cough')
 os.makedirs(IMPORT_COUGH_FOLDER, exist_ok=True)
 
-from pathlib import Path
 YAMNET_PYTHON_EXE = r"C:\ProgramData\anaconda3\envs\k_yamnet\python.exe"

@@ -65,18 +65,23 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(summary))
 
     def _archive_user_coughs(self, user_id):
-        cough_table_path = os.path.join(settings.MEDIA_ROOT, user_id, "cough_audio", "cough_table.csv")
-        if not os.path.exists(cough_table_path):
-            return 0
+        cough_folder = os.path.join(settings.MEDIA_ROOT, user_id, "cough_audio")
+        if not os.path.isdir(cough_folder):
+            return 0, 0
 
-        with open(cough_table_path, newline="", encoding="utf-8") as handle:
-            filenames = sorted(
-                {
+        filenames = {
+            entry_name for entry_name in os.listdir(cough_folder) if entry_name.endswith(".wav")
+        }
+        cough_table_path = os.path.join(cough_folder, "cough_table.csv")
+        if os.path.exists(cough_table_path):
+            with open(cough_table_path, newline="", encoding="utf-8") as handle:
+                filenames.update(
                     row.get("filename", "").strip()
                     for row in csv.DictReader(handle)
                     if row.get("filename", "").strip().endswith(".wav")
-                }
-            )
+                )
+
+        filenames = sorted(filenames)
 
         archived_count = 0
         file_failures = 0
