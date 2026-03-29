@@ -32,6 +32,110 @@ def _concatenate_drum_stage_midis(stage_paths: list[str], output_path: str) -> s
     return output_path
 
 
+def _concatenate_drum_stage_sequences(stage_sequences: list) -> object:
+    import magenta.music as mm
+
+    return mm.sequences_lib.concatenate_sequences(stage_sequences, [4.0] * len(stage_sequences))
+
+
+def _build_staged_drum_sequence(source_midi: str, quantization_level: int, target_duration: float = 4.0):
+    import note_seq
+    from note_seq.protobuf import music_pb2
+
+    original = note_seq.midi_io.midi_file_to_note_sequence(source_midi)
+    staged = music_pb2.NoteSequence()
+    staged.ticks_per_quarter = original.ticks_per_quarter or 220
+
+    if original.tempos:
+        tempo = staged.tempos.add()
+        tempo.CopyFrom(original.tempos[0])
+    else:
+        staged.tempos.add(qpm=120.0)
+
+    if original.time_signatures:
+        time_signature = staged.time_signatures.add()
+        time_signature.CopyFrom(original.time_signatures[0])
+    else:
+        staged.time_signatures.add(numerator=4, denominator=4, time=0.0)
+
+    qpm = staged.tempos[0].qpm or 120.0
+    grid_interval = (60.0 / qpm) / (quantization_level / 4)
+    staged_notes = []
+    max_end = 0.0
+
+    for note in original.notes:
+        new_start = round(note.start_time / grid_interval) * grid_interval
+        if new_start >= target_duration:
+            continue
+
+        new_end = min(target_duration, new_start + 0.125)
+        staged_notes.append((note, max(0.0, new_start), new_end))
+        max_end = max(max_end, new_end)
+
+    time_scale = (target_duration / max_end) if max_end else 1.0
+
+    for note, new_start, new_end in staged_notes:
+        new_note = staged.notes.add()
+        new_note.CopyFrom(note)
+        new_note.start_time = min(target_duration, new_start * time_scale)
+        new_note.end_time = min(target_duration, new_end * time_scale)
+
+    staged.total_time = target_duration
+    return staged
+
+
+def _write_note_sequence_midi(sequence, output_path: str) -> str:
+    import note_seq
+
+    note_seq.sequence_proto_to_midi_file(sequence, output_path)
+    return output_path
+
+
+def _load_note_sequence_midi(midi_path: str):
+    import note_seq
+
+    return note_seq.midi_io.midi_file_to_note_sequence(midi_path)
+
+
+def _run_drum_interpolation_with_candidates(
+    interpolated_groove_note_sequences,
+    concate_interpolation,
+    concatenate_note_sequence_objects,
+    tmp_last: str,
+    stage_sequences: dict[str, object],
+    job_uuid: str,
+) -> str:
+    candidate_specs = [
+        ("primary", ["sec", "third"], ["last", "last"]),
+        ("alt_last_third", ["sec", "third"], ["last", "third"]),
+        ("alt_third_last", ["sec", "third"], ["third", "last"]),
+        ("alt_third_third", ["sec", "third"], ["third", "third"]),
+    ]
+    last_error: Exception | None = None
+
+    for suffix, start_names, end_names in candidate_specs:
+        start_sequence = _concatenate_drum_stage_sequences([stage_sequences[name] for name in start_names])
+        end_sequence = _concatenate_drum_stage_sequences([stage_sequences[name] for name in end_names])
+        try:
+            interpolated_seq = interpolated_groove_note_sequences(start_sequence, end_sequence)
+            concate_interpolation(start_sequence, stage_sequences["last"], interpolated_seq, tmp_last, target_duration=8.0)
+            interpolated_block = _load_note_sequence_midi(tmp_last)
+            concatenate_note_sequence_objects(stage_sequences["first"], interpolated_block, tmp_last)
+            return tmp_last
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "Drum interpolation candidate %s failed for job %s: %s",
+                suffix,
+                job_uuid,
+                exc,
+            )
+
+    if last_error is not None:
+        raise last_error
+    raise ValueError("No drum interpolation candidates were available.")
+
+
 def _write_cumulative_drum_fallback(
     cough_seq: list[tuple[str, str]],
     df,
@@ -62,7 +166,11 @@ def _write_cumulative_drum_fallback(
 def generate_manual_drum(cough_path_list: list[Path], user_folder: str, job_uuid: str) -> tuple[str, list[Path]]:
     from .lib import midi
     from .lib.drum import process_manual_coughs, write_midi_pretty_manual
-    from .lib.generation import concatenate_sequences, concate_interpolation, interpolated_groove, path_to_note_seq
+    from .lib.generation import (
+        concatenate_note_sequence_objects,
+        concate_interpolation,
+        interpolated_groove_note_sequences,
+    )
 
     assert len(cough_path_list) == 7, "Expecting exactly 7 cough files"
     drum_trk = os.path.join(user_folder, f"{job_uuid}_drum.wav")
@@ -72,7 +180,6 @@ def generate_manual_drum(cough_path_list: list[Path], user_folder: str, job_uuid
     tmp_sec = _drum_temp_file(user_folder, f"{job_uuid}_sec.mid")
     tmp_third = _drum_temp_file(user_folder, f"{job_uuid}_third.mid")
     tmp_last = _drum_temp_file(user_folder, f"{job_uuid}_last.mid")
-    tmp_last2 = _drum_temp_file(user_folder, f"{job_uuid}_last2.mid")
 
     cough_seq = list(selected_coughs.items())
     motif_list: list[Path] = []
@@ -89,24 +196,32 @@ def generate_manual_drum(cough_path_list: list[Path], user_folder: str, job_uuid
         midi.write_from_midi(mid_path, str(wav_path))
         motif_list.append(wav_path)
 
-    tmp_first = save_midi(slice(0, 1), tmp_first)
-    tmp_sec = save_midi(slice(0, 2), tmp_sec)
-    tmp_third = save_midi(slice(0, 3), tmp_third)
-    tmp_last = save_midi(slice(0, 7), tmp_last)
+    raw_first = save_midi(slice(0, 1), _drum_temp_file(user_folder, f"{job_uuid}_first_raw.mid"))
+    raw_sec = save_midi(slice(0, 2), _drum_temp_file(user_folder, f"{job_uuid}_sec_raw.mid"))
+    raw_third = save_midi(slice(0, 3), _drum_temp_file(user_folder, f"{job_uuid}_third_raw.mid"))
+    raw_last = save_midi(slice(0, 7), _drum_temp_file(user_folder, f"{job_uuid}_last_raw.mid"))
 
-    midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
-    midi.snap_on_grid_noteseq(tmp_sec, tmp_sec, 32)
-    midi.snap_on_grid_noteseq(tmp_third, tmp_third, 16)
-    midi.snap_on_grid_noteseq(tmp_last, tmp_last, 16)
-    midi.concatenate([tmp_sec, tmp_third], tmp_third, sec=4.0)
-    midi.concatenate([tmp_last, tmp_last], tmp_last2, sec=4.0)
+    stage_sequences = {
+        "first": _build_staged_drum_sequence(raw_first, 32),
+        "sec": _build_staged_drum_sequence(raw_sec, 32),
+        "third": _build_staged_drum_sequence(raw_third, 16),
+        "last": _build_staged_drum_sequence(raw_last, 16),
+    }
+    tmp_first = _write_note_sequence_midi(stage_sequences["first"], tmp_first)
+    tmp_sec = _write_note_sequence_midi(stage_sequences["sec"], tmp_sec)
+    tmp_third = _write_note_sequence_midi(stage_sequences["third"], tmp_third)
+    tmp_last = _write_note_sequence_midi(stage_sequences["last"], tmp_last)
 
     final_midi = tmp_last
     try:
-        interpolated_seq = interpolated_groove(tmp_third, tmp_last2, tmp_last)
-        start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
-        concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, tmp_last, target_duration=8.0)
-        concatenate_sequences(tmp_first, tmp_last, tmp_last)
+        final_midi = _run_drum_interpolation_with_candidates(
+            interpolated_groove_note_sequences,
+            concate_interpolation,
+            concatenate_note_sequence_objects,
+            tmp_last,
+            stage_sequences,
+            job_uuid,
+        )
     except Exception as exc:
         logger.warning(
             "Drum interpolation failed for job %s: %s. Using cumulative motif fallback.",
@@ -129,7 +244,11 @@ def generate_manual_drum(cough_path_list: list[Path], user_folder: str, job_uuid
 def generate_autofill_drum(cough_path_list: list[Path], user_folder: str, job_uuid: str) -> DrumAutofillResult:
     from .lib import midi
     from .lib.drum import process_autofill_coughs, write_midi_pretty_manual
-    from .lib.generation import concatenate_sequences, concate_interpolation, interpolated_groove, path_to_note_seq
+    from .lib.generation import (
+        concatenate_note_sequence_objects,
+        concate_interpolation,
+        interpolated_groove_note_sequences,
+    )
 
     selected_coughs, df, id_to_path, used_public_paths = process_autofill_coughs(
         [str(path) for path in cough_path_list],
@@ -140,7 +259,6 @@ def generate_autofill_drum(cough_path_list: list[Path], user_folder: str, job_uu
     tmp_sec = _drum_temp_file(user_folder, f"{job_uuid}_sec.mid")
     tmp_third = _drum_temp_file(user_folder, f"{job_uuid}_third.mid")
     tmp_last = _drum_temp_file(user_folder, f"{job_uuid}_last.mid")
-    tmp_last2 = _drum_temp_file(user_folder, f"{job_uuid}_last2.mid")
     drum_trk = os.path.join(user_folder, f"{job_uuid}_drum.wav")
 
     cough_seq = list(selected_coughs.items())
@@ -158,24 +276,32 @@ def generate_autofill_drum(cough_path_list: list[Path], user_folder: str, job_uu
         midi.write_from_midi(mid_path, str(wav_path))
         motif_list.append(wav_path)
 
-    tmp_first = save_midi(slice(0, 1), tmp_first)
-    tmp_sec = save_midi(slice(0, 2), tmp_sec)
-    tmp_third = save_midi(slice(0, 3), tmp_third)
-    tmp_last = save_midi(slice(0, 7), tmp_last)
+    raw_first = save_midi(slice(0, 1), _drum_temp_file(user_folder, f"{job_uuid}_first_raw.mid"))
+    raw_sec = save_midi(slice(0, 2), _drum_temp_file(user_folder, f"{job_uuid}_sec_raw.mid"))
+    raw_third = save_midi(slice(0, 3), _drum_temp_file(user_folder, f"{job_uuid}_third_raw.mid"))
+    raw_last = save_midi(slice(0, 7), _drum_temp_file(user_folder, f"{job_uuid}_last_raw.mid"))
 
-    midi.snap_on_grid_noteseq(tmp_first, tmp_first, 32)
-    midi.snap_on_grid_noteseq(tmp_sec, tmp_sec, 32)
-    midi.snap_on_grid_noteseq(tmp_third, tmp_third, 16)
-    midi.snap_on_grid_noteseq(tmp_last, tmp_last, 16)
-    midi.concatenate([tmp_sec, tmp_third], tmp_third, sec=4.0)
-    midi.concatenate([tmp_last, tmp_last], tmp_last2, sec=4.0)
+    stage_sequences = {
+        "first": _build_staged_drum_sequence(raw_first, 32),
+        "sec": _build_staged_drum_sequence(raw_sec, 32),
+        "third": _build_staged_drum_sequence(raw_third, 16),
+        "last": _build_staged_drum_sequence(raw_last, 16),
+    }
+    tmp_first = _write_note_sequence_midi(stage_sequences["first"], tmp_first)
+    tmp_sec = _write_note_sequence_midi(stage_sequences["sec"], tmp_sec)
+    tmp_third = _write_note_sequence_midi(stage_sequences["third"], tmp_third)
+    tmp_last = _write_note_sequence_midi(stage_sequences["last"], tmp_last)
 
     final_midi = tmp_last
     try:
-        interpolated_seq = interpolated_groove(tmp_third, tmp_last2, tmp_last)
-        start_note_seq, end_note_seq = path_to_note_seq(tmp_third, tmp_last)
-        concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, tmp_last, target_duration=8.0)
-        concatenate_sequences(tmp_first, tmp_last, tmp_last)
+        final_midi = _run_drum_interpolation_with_candidates(
+            interpolated_groove_note_sequences,
+            concate_interpolation,
+            concatenate_note_sequence_objects,
+            tmp_last,
+            stage_sequences,
+            job_uuid,
+        )
     except Exception as exc:
         logger.warning(
             "Autofill drum interpolation failed for job %s: %s. Using cumulative motif fallback.",

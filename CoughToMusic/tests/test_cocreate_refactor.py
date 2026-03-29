@@ -238,14 +238,29 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
         )
         drum_module.write_midi_pretty_manual = lambda *args, **kwargs: None
         generation_module = types.ModuleType("CoughToMusic.cocreate.lib.generation")
-        generation_module.concatenate_sequences = lambda *args, **kwargs: None
+        generation_module.concatenate_note_sequence_objects = lambda *args, **kwargs: None
         generation_module.concate_interpolation = lambda *args, **kwargs: None
-        generation_module.interpolated_groove = lambda *args, **kwargs: "interp.mid"
-        generation_module.path_to_note_seq = lambda *args, **kwargs: ("start", "end")
+        generation_module.interpolated_groove_note_sequences = lambda *args, **kwargs: ["interp"]
         lib_module = types.ModuleType("CoughToMusic.cocreate.lib")
         lib_module.midi = midi_module
 
-        with patch.dict(
+        with patch.object(
+            drum_adapters,
+            "_build_staged_drum_sequence",
+            side_effect=lambda source, quantization_level: object(),
+        ), patch.object(
+            drum_adapters,
+            "_write_note_sequence_midi",
+            side_effect=lambda sequence, output_path: output_path,
+        ), patch.object(
+            drum_adapters,
+            "_load_note_sequence_midi",
+            side_effect=lambda midi_path: object(),
+        ), patch.object(
+            drum_adapters,
+            "_run_drum_interpolation_with_candidates",
+            return_value=str(Path("temp_drum") / "job-1_last.mid"),
+        ), patch.dict(
             sys.modules,
             {
                 "CoughToMusic.cocreate.lib": lib_module,
@@ -310,10 +325,9 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
         drum_module.process_manual_coughs = lambda *args, **kwargs: (selected_coughs, object())
         drum_module.write_midi_pretty_manual = fake_write_midi_pretty_manual
         generation_module = types.ModuleType("CoughToMusic.cocreate.lib.generation")
-        generation_module.concatenate_sequences = lambda *args, **kwargs: None
+        generation_module.concatenate_note_sequence_objects = lambda *args, **kwargs: None
         generation_module.concate_interpolation = lambda *args, **kwargs: None
-        generation_module.interpolated_groove = fake_interpolated_groove
-        generation_module.path_to_note_seq = lambda *args, **kwargs: ("start", "end")
+        generation_module.interpolated_groove_note_sequences = fake_interpolated_groove
         lib_module = types.ModuleType("CoughToMusic.cocreate.lib")
         lib_module.midi = midi_module
 
@@ -321,6 +335,18 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
             drum_adapters,
             "_concatenate_drum_stage_midis",
             side_effect=fake_fallback,
+        ), patch.object(
+            drum_adapters,
+            "_build_staged_drum_sequence",
+            side_effect=lambda source, quantization_level: object(),
+        ), patch.object(
+            drum_adapters,
+            "_write_note_sequence_midi",
+            side_effect=lambda sequence, output_path: output_path,
+        ), patch.object(
+            drum_adapters,
+            "_load_note_sequence_midi",
+            side_effect=lambda midi_path: object(),
         ), patch.dict(
             sys.modules,
             {
@@ -336,6 +362,90 @@ class CoCreateRefactorTests(TempMediaMixin, TestCase):
         self.assertEqual(len(fallback_calls["stage_paths"]), 8)
         self.assertTrue(fallback_calls["stage_paths"][-1].endswith("job-1_fallback_last2.mid"))
         self.assertEqual(midi_calls["render"], str(Path("temp_drum") / "job-1_fallback_concat.mid"))
+
+    def test_generate_manual_drum_retries_interpolation_candidates_before_fallback(self):
+        from CoughToMusic.cocreate import drum_adapters
+
+        Path("temp_drum").mkdir(parents=True, exist_ok=True)
+        cough_paths = [Path(f"cough-{index}.wav") for index in range(7)]
+        selected_coughs = {
+            "kick": "cough-0",
+            "snare": "cough-1",
+            "closed_hihat": "cough-2",
+            "open_hihat": "cough-3",
+            "mid_tom": "cough-4",
+            "low_tom": "cough-5",
+            "crash": "cough-6",
+        }
+        attempted_pairs = []
+        midi_calls = {"render": None}
+
+        def fake_write_midi_pretty_manual(selected_subset, df, cough_path_list, output_midi):
+            Path(output_midi).write_bytes(b"mid")
+
+        def fake_write_from_midi(midi_file, output_file, sf="drum"):
+            midi_calls["render"] = midi_file
+
+        def fake_interpolated_groove(start_sequence, end_sequence):
+            attempted_pairs.append((start_sequence, end_sequence))
+            if len(attempted_pairs) == 1:
+                raise ValueError("cannot tensorize primary")
+            return ["interp"]
+
+        midi_module = types.SimpleNamespace(
+            adjust_to_2bars=lambda *args, **kwargs: None,
+            write_from_midi=fake_write_from_midi,
+            snap_on_grid_noteseq=lambda *args, **kwargs: None,
+            concatenate=lambda *args, **kwargs: None,
+        )
+        drum_module = types.ModuleType("CoughToMusic.cocreate.lib.drum")
+        drum_module.process_manual_coughs = lambda *args, **kwargs: (selected_coughs, object())
+        drum_module.write_midi_pretty_manual = fake_write_midi_pretty_manual
+        generation_module = types.ModuleType("CoughToMusic.cocreate.lib.generation")
+        generation_module.concatenate_note_sequence_objects = lambda *args, **kwargs: None
+        generation_module.concate_interpolation = lambda *args, **kwargs: None
+        generation_module.interpolated_groove_note_sequences = fake_interpolated_groove
+        lib_module = types.ModuleType("CoughToMusic.cocreate.lib")
+        lib_module.midi = midi_module
+
+        with patch.object(
+            drum_adapters,
+            "_build_staged_drum_sequence",
+            side_effect=lambda source, quantization_level: object(),
+        ), patch.object(
+            drum_adapters,
+            "_write_note_sequence_midi",
+            side_effect=lambda sequence, output_path: output_path,
+        ), patch.object(
+            drum_adapters,
+            "_load_note_sequence_midi",
+            side_effect=lambda midi_path: object(),
+        ), patch.object(
+            drum_adapters,
+            "_concatenate_drum_stage_sequences",
+            side_effect=lambda stage_sequences: tuple(stage_sequences),
+        ), patch.object(
+            drum_adapters,
+            "_run_drum_interpolation_with_candidates",
+            wraps=drum_adapters._run_drum_interpolation_with_candidates,
+        ), patch.object(
+            drum_adapters,
+            "_write_cumulative_drum_fallback",
+            side_effect=AssertionError("fallback should not run"),
+        ), patch.dict(
+            sys.modules,
+            {
+                "CoughToMusic.cocreate.lib": lib_module,
+                "CoughToMusic.cocreate.lib.drum": drum_module,
+                "CoughToMusic.cocreate.lib.generation": generation_module,
+            },
+        ):
+            generated_music, motif_paths = drum_adapters.generate_manual_drum(cough_paths, "temp_drum", "job-2")
+
+        self.assertEqual(generated_music, str(Path("temp_drum") / "job-2_drum.wav"))
+        self.assertEqual(len(motif_paths), 7)
+        self.assertEqual(len(attempted_pairs), 2)
+        self.assertEqual(midi_calls["render"], str(Path("temp_drum") / "job-2_last.mid"))
 
     def test_write_from_midi_raises_when_fluidsynth_produces_no_output(self):
         from CoughToMusic.cocreate.lib import midi as midi_lib

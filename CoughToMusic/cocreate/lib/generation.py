@@ -81,6 +81,14 @@ def concatenate_sequences(midi_path_start, midi_path_end, output_path):
     mm.sequence_proto_to_midi_file(final_seq, output_path)
 
 
+def concatenate_note_sequence_objects(start_note_seq, end_note_seq, output_path, start_duration=4.0):
+    final_seq = mm.sequences_lib.concatenate_sequences(
+        [start_note_seq, end_note_seq],
+        [start_duration, end_note_seq.total_time],
+    )
+    mm.sequence_proto_to_midi_file(final_seq, output_path)
+
+
 def concate_interpolation(start_note_seq, end_note_seq, interp_note_seq, output_path, target_duration=4.0):
     interp_note_seq = [normalize_sequence_duration(seq, target_duration) for seq in interp_note_seq]
     # print(f'concate:', interp_note_seq)
@@ -499,12 +507,10 @@ def generate_humanize_groove(mid_pth, output_pth):
     note_seq.sequence_proto_to_midi_file(combined_seq, output_pth)
 
 
-def interpolated_groove(start_path, end_path, interp_output_path, steps =2):
+def interpolated_groove_note_sequences(start_note_seq, end_note_seq, steps=2):
     config_4_bar = configs.CONFIG_MAP['groovae_4bar']
     model_path = str(Path("CoughToMusic/cocreate/model") / "groovae_4bar" / "model.ckpt-2721")
     groovae_model = TrainedModel(config_4_bar, batch_size=1, checkpoint_dir_or_path=model_path)
-    start_note_seq, end_note_seq = path_to_note_seq(start_path, end_path)
-
     start_outputs = config_4_bar.data_converter.to_tensors(start_note_seq).outputs
     end_outputs = config_4_bar.data_converter.to_tensors(end_note_seq).outputs
     start_tensors = config_4_bar.data_converter.from_tensors(start_outputs)
@@ -525,8 +531,12 @@ def interpolated_groove(start_path, end_path, interp_output_path, steps =2):
             note.velocity = min(note.velocity + 55, 127)
     # print(f"Interpolated drum sequence generated {len(interpolated_seq)}")
     
-    # concate_interpolation(start_note_seq, end_note_seq, interpolated_seq, interp_output_path, target_duration=8.0)
     return interpolated_seq
+
+
+def interpolated_groove(start_path, end_path, interp_output_path, steps =2):
+    start_note_seq, end_note_seq = path_to_note_seq(start_path, end_path)
+    return interpolated_groove_note_sequences(start_note_seq, end_note_seq, steps=steps)
   
 
 # #import magenta.music as mm
