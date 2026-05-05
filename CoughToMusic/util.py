@@ -7,7 +7,7 @@ import io
 from .table import update_music_table
 import numpy as np
 from .utils.runner import run_cli
-from .windowing import detect_onsets, select_analysis_window
+from .windowing import select_analysis_window
 
 
 def save_pcm16_to_wav(filename, data, rate):
@@ -291,14 +291,15 @@ def is_blank(wav_path, *, audio_loader=None, onset_module=None, freq_module=None
     if audio_loader is None:
         _debug("using lightweight wav loader")
         audio_loader = _load_wav_audio
-    if onset_module is None or freq_module is None or configs is None:
-        _debug("importing blank-detection onset/freq helpers and configs")
+    if onset_module is None:
+        _debug("importing onset module (same as drum)")
+        from .cocreate.lib.cough_to_midi import onset as onset_module
+    if freq_module is None:
+        _debug("importing freq module")
+        from .cocreate.lib.cough_to_midi import freq as freq_module
+    if configs is None:
         from .cocreate.workflow_common import ACC_CONFIG, BASS_CONFIG, MEL_CONFIG
-
-        onset_module = onset_module or _BlankOnsetModule()
-        freq_module = freq_module or _BlankFreqModule()
-        configs = configs or (MEL_CONFIG, ACC_CONFIG, BASS_CONFIG)
-        _debug("finished blank-detection helper/config imports")
+        configs = (MEL_CONFIG, ACC_CONFIG, BASS_CONFIG)
 
     _debug("loading audio")
     audio_data, sample_rate = audio_loader(wav_path, sr=None, mono=True)
@@ -328,17 +329,19 @@ def is_blank(wav_path, *, audio_loader=None, onset_module=None, freq_module=None
 
     audio_duration = len(audio_data) / float(sample_rate) if sample_rate else 0
 
+    # Run CREPE once; apply each config's threshold on the cached output.
+    _debug("running CREPE prediction once")
+    crepe_time, crepe_raw_freq, crepe_confidence = freq_module.predict_crepe(audio_data, sample_rate)
+    _debug("CREPE prediction done")
+
     for index, config in enumerate(configs, start=1):
         _debug(
-            "running crepe/note pass "
-            f"{index}/{len(configs)} threshold={config['threshold']} energy_th={config['energy_th']}"
+            f"threshold pass {index}/{len(configs)} "
+            f"threshold={config['threshold']} energy_th={config['energy_th']}"
         )
-        _, f0 = freq_module.get_by_crepe(
-            audio_data,
-            sample_rate,
-            config["threshold"],
-            energy_threshold=config["energy_th"],
-        )
+        _, f0 = freq_module.apply_crepe_threshold(
+            crepe_time, crepe_raw_freq, crepe_confidence,
+            config["threshold"], config["energy_th"])
         f0_scaled = freq_module.log_scale_frequencies(f0, config["min_target"], config["max_target"])
         result_array, notes_on_frame, notes_off_frame = freq_module.to_note_msg(
             onset_times,
@@ -413,128 +416,6 @@ def _decode_pcm24(raw_frames):
     return signed.astype(np.float32) / 8388608.0
 
 
-class _BlankOnsetModule:
-    @staticmethod
-    def detect(audio_data, sr, initial_threshold=0.2, min_threshold=0.05, step=0.05):
-        return detect_onsets(audio_data, sr, initial_threshold, min_threshold, step)
-
-
-class _BlankFreqModule:
-    @staticmethod
-    def get_by_crepe(audio_data, sr, threshold, energy_threshold, energy_filter=True):
-        import crepe
-        import librosa
-
-        time, frequency, confidence, _ = crepe.predict(audio_data, sr=sr, viterbi=True)
-        frequency = np.where(confidence < threshold, np.nan, frequency)
-        if energy_filter:
-            spectrogram = librosa.feature.melspectrogram(y=audio_data, sr=sr, n_mels=128, fmax=8000)
-            mel_times = librosa.frames_to_time(np.arange(spectrogram.shape[1]), sr=sr, hop_length=512)
-            spectrogram_db = librosa.power_to_db(spectrogram, ref=np.max)
-            energy_mask = np.interp(time, mel_times, spectrogram_db.max(axis=0)) > energy_threshold
-            frequency = np.where(energy_mask, frequency, np.nan)
-        return time, frequency
-
-    @staticmethod
-    def log_scale_frequencies(frequencies, min_target, max_target):
-        import librosa
-
-        valid_freqs = frequencies[~np.isnan(frequencies) & (frequencies > 0)]
-        if len(valid_freqs) == 0:
-            return frequencies
-
-        fmin_input = np.min(valid_freqs)
-        fmax_input = np.max(valid_freqs)
-        if np.isclose(fmax_input, fmin_input):
-            return np.asarray(frequencies)
-        log_fmin_input = np.log2(fmin_input)
-        log_fmax_input = np.log2(fmax_input)
-        fmin_target = librosa.note_to_hz(min_target)
-        fmax_target = librosa.note_to_hz(max_target)
-
-        scaled = []
-        for frequency in frequencies:
-            if np.isnan(frequency) or frequency <= 0:
-                scaled.append(frequency)
-                continue
-            log_freq = np.log2(frequency)
-            scaled_log_freq = (log_freq - log_fmin_input) / (log_fmax_input - log_fmin_input)
-            scaled_log_freq = scaled_log_freq * (np.log2(fmax_target) - np.log2(fmin_target)) + np.log2(fmin_target)
-            scaled.append(2 ** scaled_log_freq)
-        return np.asarray(scaled)
-
-    @staticmethod
-    def to_note_msg(onset_time, f0, freq_range_th, note_interval_th, break_th, wavefile_time):
-        onset_point = _seconds_to_frames(onset_time, wavefile_time, f0)
-        result_array = []
-        time_start_array = []
-        time_end_array = []
-
-        def process_interval(start, end):
-            temp_array = []
-            nan_count = 0
-            freq_seen = 0
-            nan_token = 0
-
-            for frame_index in range(start, end):
-                if np.isnan(f0[frame_index]):
-                    if freq_seen:
-                        nan_count += 1
-                        freq_seen = 0
-                    else:
-                        if nan_count > note_interval_th:
-                            if temp_array:
-                                average_freq = np.mean(temp_array)
-                                result_array.append(average_freq)
-                                time_end_array.append(frame_index - nan_count)
-                                temp_array = []
-                                nan_count = 0
-                            elif nan_token < break_th:
-                                nan_token += 1
-                            else:
-                                break
-                        else:
-                            nan_count += 1
-                else:
-                    if not temp_array:
-                        temp_array.append(f0[frame_index])
-                        time_start_array.append(frame_index)
-                        nan_count = 0
-                        freq_seen = 1
-                    else:
-                        average_freq = np.mean(temp_array)
-                        if abs(f0[frame_index] - average_freq) > (freq_range_th * average_freq):
-                            time_end_array.append(frame_index - 1)
-                            result_array.append(average_freq)
-                            temp_array = [f0[frame_index]]
-                            time_start_array.append(frame_index)
-                            nan_count = 0
-                            freq_seen = 1
-                        else:
-                            temp_array.append(f0[frame_index])
-                            nan_count = 0
-                            freq_seen = 1
-
-            if temp_array:
-                average_freq = np.mean(temp_array)
-                result_array.append(average_freq)
-                time_end_array.append(end - 1)
-
-        if len(onset_point) == 0:
-            process_interval(0, len(f0))
-        else:
-            for index, start in enumerate(onset_point):
-                end = onset_point[index + 1] if index < len(onset_point) - 1 else len(f0)
-                process_interval(start, end)
-
-        return np.asarray(result_array), np.asarray(time_start_array), np.asarray(time_end_array)
-
-def _seconds_to_frames(time_array, total_time, f0):
-    onset_time_array = []
-    for onset_time in time_array:
-        frame_value = int((onset_time / total_time) * len(f0)) if total_time else 0
-        onset_time_array.append(frame_value)
-    return np.array(onset_time_array)
 
 
 def filter_coughs(audio_path):

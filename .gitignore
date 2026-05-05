@@ -4,6 +4,8 @@ tmp/
 tmp*/
 probe_media*/ 
 .numba_cache/ 
+start.sh
+.claude
 media/
 __pycache__/
 CoughToMusic/cocreate/model/

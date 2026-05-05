@@ -37,35 +37,33 @@ def cough_to_midi_wavs(
 
 
 def cough2midi(cough_pth, motif_pth, threshold, freq_range_th, note_interval_th,
-               min_target, max_target, energy_th, tried_fallback=False):
+               min_target, max_target, energy_th):
     import audio
     import midi
     from cough_to_midi import freq
 
     cough_data, sample_rate = audio.load_from_file(cough_pth)
     cough_data, _ = select_analysis_window(cough_data, sample_rate)
-    
-    cough_freq = freq.get_by_crepe(cough_data, sample_rate, threshold, energy_threshold=energy_th)
-    # print(f"cough_freq: {cough_freq}")
 
-    if not cough_freq:
-        if tried_fallback:
-            logger.warning("No frequency detected even with fallback threshold. Aborting.")
-            return False
-        logger.warning("No frequency detected in the cough audio. Retrying with fallback threshold = 0.1.")
-        return cough2midi(cough_pth, motif_pth, 0.1, freq_range_th, note_interval_th,
-                          min_target, max_target, energy_th, tried_fallback=True)
-    
+    # Run CREPE once; reuse cached output for fallback instead of re-running inference.
+    crepe_time, crepe_raw_freq, crepe_confidence = freq.predict_crepe(cough_data, sample_rate)
+
+    cough_freq = freq.apply_crepe_threshold(
+        crepe_time, crepe_raw_freq, crepe_confidence, threshold,
+        energy_threshold=energy_th, audio_data=cough_data, sr=sample_rate)
     success = freq.write_midi(cough_data, sample_rate, cough_freq, motif_pth,
                               min_target, max_target, freq_range_th, note_interval_th)
-    
+
     if not success:
-        if tried_fallback:
-            logger.warning("write_midi failed even with fallback threshold. Aborting.")
+        logger.warning("write_midi failed. Retrying with fallback threshold=0.1 on cached CREPE output.")
+        cough_freq = freq.apply_crepe_threshold(
+            crepe_time, crepe_raw_freq, crepe_confidence, 0.1,
+            energy_threshold=energy_th, audio_data=cough_data, sr=sample_rate)
+        success = freq.write_midi(cough_data, sample_rate, cough_freq, motif_pth,
+                                  min_target, max_target, freq_range_th, note_interval_th)
+        if not success:
+            logger.warning("Fallback also failed. Aborting.")
             return False
-        logger.warning("write_midi failed. Retrying with fallback threshold = 0.2.")
-        return cough2midi(cough_pth, motif_pth, 0.2, freq_range_th, note_interval_th,
-                          min_target, max_target, energy_th, tried_fallback=True)
 
     midi.to_2bars(motif_pth, motif_pth)
     return True

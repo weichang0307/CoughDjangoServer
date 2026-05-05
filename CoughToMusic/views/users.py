@@ -11,6 +11,7 @@ from ..services.users import (
     sign_up_user,
     stop_record_payload,
     submit_survey_payload,
+    delete_account_payload,
 )
 
 
@@ -103,6 +104,18 @@ def submit_survey(request):
     except Exception as exc:
         print("Error in submit_survey: ", exc)
         return JsonResponse({"error": str(exc)}, status=400)
+    
+@csrf_exempt
+def delete_account(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=400)
+
+    try:
+        metadata_dict = json.loads(request.body)
+        return JsonResponse(delete_account_payload(metadata_dict), status=200)
+    except Exception as exc:
+        print("Error in delete_account: ", exc)
+        return JsonResponse({"error": str(exc)}, status=400)
 
 
 __all__ = [
@@ -113,4 +126,5 @@ __all__ = [
     "start_record",
     "stop_record",
     "submit_survey",
+    "delete_account"
 ]

@@ -167,7 +167,26 @@ def submit_survey_payload(metadata_dict):
         df.to_csv(survey_table_path, mode="a", header=False, index=False, columns=columns)
     return {"message": "Survey submitted successfully."}
 
-
 def _get_user_table_path(user_id):
     user_folder = os.path.join(settings.MEDIA_ROOT, user_id)
     return os.path.join(user_folder, f"{user_id}.csv")
+
+def delete_account_payload(metadata_dict):
+    # 1. 拿出前端傳來的舊帳號與新亂碼帳號
+    old_user_id = metadata_dict.get('old_userId')
+    new_user_id = metadata_dict.get('new_userId')
+    
+    if not old_user_id or not new_user_id:
+        raise ValueError("Missing old_userId or new_userId")
+
+    # 2. 改名邏輯
+    base_path = settings.MEDIA_ROOT
+    old_folder_path = os.path.join(base_path, old_user_id)
+    new_folder_path = os.path.join(base_path, new_user_id)
+
+    if os.path.exists(old_folder_path):
+        os.rename(old_folder_path, new_folder_path)
+    else:
+        pass
+
+    return {"status": "success", "message": f"Account {old_user_id} anonymized."}

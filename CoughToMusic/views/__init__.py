@@ -22,6 +22,7 @@ from .users import (
     start_record,
     stop_record,
     submit_survey,
+    delete_account,
 )
 
 __all__ = [
@@ -53,4 +54,5 @@ __all__ = [
     "submit_survey",
     "upload_to_public_cough",
     "upload_to_public_music",
+    "delete_account",
 ]

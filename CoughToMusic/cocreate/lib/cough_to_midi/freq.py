@@ -16,17 +16,30 @@ logger = logging.getLogger(__name__)
 
 
 
-def get_by_crepe(audio_data, sr, threshold, energy_threshold, energy_filter = True):
+def predict_crepe(audio_data, sr):
+    """Run CREPE inference once; returns raw (time, frequency, confidence) before any threshold filtering."""
     time, frequency, confidence, _ = crepe.predict(audio_data, sr=sr, viterbi=True)
-    frequency = np.where(confidence < threshold, np.nan, frequency)
-    if energy_filter == True:
+    return time, frequency, confidence
+
+
+def apply_crepe_threshold(time, raw_frequency, confidence, threshold, energy_threshold=-1000,
+                          audio_data=None, sr=None, energy_filter=True):
+    """Apply confidence threshold (and optional energy filter) to cached CREPE output."""
+    frequency = np.where(confidence < threshold, np.nan, raw_frequency.copy())
+    if energy_filter and audio_data is not None and sr is not None and energy_threshold > -1000:
         S = librosa.feature.melspectrogram(y=audio_data, sr=sr, n_mels=128, fmax=8000)
         mel_times = librosa.frames_to_time(np.arange(S.shape[1]), sr=sr, hop_length=512)
         S_dB = librosa.power_to_db(S, ref=np.max)
         energy_mask = np.interp(time, mel_times, S_dB.max(axis=0)) > energy_threshold
         frequency = np.where(energy_mask, frequency, np.nan)
-        
     return time, frequency
+
+
+def get_by_crepe(audio_data, sr, threshold, energy_threshold, energy_filter=True):
+    """Backward-compatible wrapper: predict + threshold in one call."""
+    time, raw_frequency, confidence = predict_crepe(audio_data, sr)
+    return apply_crepe_threshold(time, raw_frequency, confidence, threshold, energy_threshold,
+                                 audio_data, sr, energy_filter)
 
 def get_by_pyin(audio_data):
     f0, _, _ = librosa.pyin(audio_data, fmin=librosa.note_to_hz('C1'), fmax=librosa.note_to_hz('C7'))

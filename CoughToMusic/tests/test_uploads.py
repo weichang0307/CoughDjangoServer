@@ -262,8 +262,12 @@ class UploadFilterIsolationTests(TempMediaMixin, TestCase):
                 "note_interval_th": 20,
             }
         ]
+        _fake_crepe_time = np.array([0.1, 0.2])
+        _fake_raw_freq = np.array([220.0, 330.0])
+        _fake_confidence = np.array([0.9, 0.9])
         fake_onset.detect = lambda audio_data, sample_rate: np.array([0.2])
-        fake_freq.get_by_crepe = lambda *args, **kwargs: (np.array([0.1, 0.2]), np.array([220.0, 330.0]))
+        fake_freq.predict_crepe = lambda audio_data, sr: (_fake_crepe_time, _fake_raw_freq, _fake_confidence)
+        fake_freq.apply_crepe_threshold = lambda time, raw, conf, threshold, energy_th: (time, raw)
         fake_freq.log_scale_frequencies = lambda frequencies, min_target, max_target: np.asarray(frequencies)
         fake_freq.to_note_msg = lambda *args, **kwargs: (np.array([220.0]), np.array([1]), np.array([2]))
 
@@ -298,7 +302,8 @@ class UploadFilterIsolationTests(TempMediaMixin, TestCase):
             }
         ]
         fake_onset.detect = lambda audio_data, sample_rate: np.array([])
-        fake_freq.get_by_crepe = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("crepe should not run"))
+        fake_freq.predict_crepe = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("crepe should not run"))
+        fake_freq.apply_crepe_threshold = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("crepe should not run"))
         fake_freq.log_scale_frequencies = lambda frequencies, min_target, max_target: frequencies
         fake_freq.to_note_msg = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("midi should not run"))
 
@@ -332,8 +337,12 @@ class UploadFilterIsolationTests(TempMediaMixin, TestCase):
                 "note_interval_th": 20,
             }
         ]
+        _fake_crepe_time = np.array([0.1, 0.2])
+        _fake_raw_freq = np.array([220.0, 330.0])
+        _fake_confidence = np.array([0.9, 0.9])
         fake_onset.detect = lambda audio_data, sample_rate: np.array([0.1, 0.4])
-        fake_freq.get_by_crepe = lambda *args, **kwargs: (np.array([0.1, 0.2]), np.array([220.0, 330.0]))
+        fake_freq.predict_crepe = lambda audio_data, sr: (_fake_crepe_time, _fake_raw_freq, _fake_confidence)
+        fake_freq.apply_crepe_threshold = lambda time, raw, conf, threshold, energy_th: (time, raw)
         fake_freq.log_scale_frequencies = lambda frequencies, min_target, max_target: np.asarray(frequencies)
         fake_freq.to_note_msg = lambda *args, **kwargs: (np.array([220.0]), np.array([1]), np.array([2]))
 
